@@ -6,7 +6,7 @@ Split a restaurant bill by item, then send each person their share on WhatsApp.
 
 - Tag who shared each item — nobody pays for what they didn't order.
 - Service charge and tax entered once as percentages, allocated in proportion to each person's subtotal. Shares always add up to the bill total exactly (largest-remainder rounding, no lost rupiah).
-- Discount as a rupiah amount, split evenly per head (a voucher is worth the same to everyone), capped at the bill total.
+- Discount as a rupiah amount, a percentage of the bill, or both — split evenly per head (a voucher is worth the same to everyone), capped at the bill total.
 - **PDF** of the whole bill: on a phone the share sheet hands it straight to WhatsApp; on desktop it downloads.
 - **▸ WhatsApp** per person: opens WhatsApp with their itemised share prefilled. Add their phone number to go straight to the chat, or leave it blank and pick the contact in WhatsApp.
 - No accounts, no server. The bill lives in your browser's `localStorage`.

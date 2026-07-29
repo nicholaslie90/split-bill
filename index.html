@@ -108,10 +108,11 @@
     <label style="margin-top:10px; display:flex; gap:8px; align-items:center">
       <input id="tos" type="checkbox" style="width:auto"> Charge tax on top of the service charge
     </label>
-    <div style="margin-top:10px">
-      <label for="disc">Discount (Rp) — split evenly per person</label>
-      <input id="disc" type="number" min="0" step="1" inputmode="decimal">
+    <div class="grid2" style="margin-top:10px">
+      <div><label for="disc">Discount (Rp)</label><input id="disc" type="number" min="0" step="1" inputmode="decimal"></div>
+      <div><label for="discPct">Discount %</label><input id="discPct" type="number" min="0" max="100" step="0.1" inputmode="decimal"></div>
     </div>
+    <p class="hint" style="margin-top:6px">Either one (or both) — the discount is split evenly per person.</p>
   </section>
 
   <section>
@@ -149,10 +150,11 @@ function el(tag, props = {}, kids = []) {
 const blank = () => ({
   title: '', date: new Date().toISOString().slice(0, 10),
   participants: [], phones: {}, items: [],
-  servicePct: 5, taxPct: 11, taxOnService: true, discount: '',
+  servicePct: 5, taxPct: 11, taxOnService: true, discount: '', discountPct: '',
 });
 
-const FIELDS = [['title', 'title'], ['date', 'date'], ['svc', 'servicePct'], ['tax', 'taxPct'], ['disc', 'discount']];
+const FIELDS = [['title', 'title'], ['date', 'date'], ['svc', 'servicePct'], ['tax', 'taxPct'],
+                ['disc', 'discount'], ['discPct', 'discountPct']];
 
 let bill;
 try { bill = { ...blank(), ...JSON.parse(localStorage.getItem(KEY) || '{}') }; }
@@ -271,6 +273,7 @@ $('addItem').onclick = () => {
 let result = { people: [], subtotal: 0, service: 0, tax: 0, total: 0 };
 
 const label = () => `${bill.title?.trim() || 'Split Bill'}${bill.date ? ` (${bill.date})` : ''}`;
+const discLabel = () => `Discount${Number(bill.discountPct) ? ` ${bill.discountPct}%` : ''}`;
 
 // The message each person receives. Same numbers as the PDF, just plain text.
 function messageFor(p) {
@@ -315,7 +318,7 @@ function renderSummary() {
   t.append(el('div', {}, [el('span', { textContent: 'Subtotal' }), el('span', { textContent: `Rp ${money(result.subtotal)}` })]));
   if (result.service) t.append(el('div', {}, [el('span', { textContent: `Service ${bill.servicePct}%` }), el('span', { textContent: `Rp ${money(result.service)}` })]));
   if (result.tax) t.append(el('div', {}, [el('span', { textContent: `Tax ${bill.taxPct}%` }), el('span', { textContent: `Rp ${money(result.tax)}` })]));
-  if (result.discount) t.append(el('div', {}, [el('span', { textContent: `Discount (÷${result.people.length})` }), el('span', { textContent: `− Rp ${money(result.discount)}` })]));
+  if (result.discount) t.append(el('div', {}, [el('span', { textContent: `${discLabel()} (÷${result.people.length})` }), el('span', { textContent: `− Rp ${money(result.discount)}` })]));
   t.append(el('div', { className: 'grand' }, [el('span', { textContent: 'Total' }), el('span', { textContent: `Rp ${money(result.total)}` })]));
   box.append(t);
 }
@@ -352,7 +355,7 @@ function buildPdf() {
   line('Subtotal', `Rp ${money(result.subtotal)}`, { bold: true });
   if (result.service) line(`Service charge ${bill.servicePct}%`, `Rp ${money(result.service)}`);
   if (result.tax) line(`Tax ${bill.taxPct}%`, `Rp ${money(result.tax)}`);
-  if (result.discount) line(`Discount (split ${result.people.length})`, `- Rp ${money(result.discount)}`);
+  if (result.discount) line(`${discLabel()} (split ${result.people.length})`, `- Rp ${money(result.discount)}`);
   line('TOTAL', `Rp ${money(result.total)}`, { size: 12, bold: true, gap: 28 });
 
   line('WHO PAYS WHAT', null, { size: 9, bold: true, gap: 16 });

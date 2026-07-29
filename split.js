@@ -23,7 +23,7 @@ export function allocate(total, weights) {
 }
 
 // bill: { participants: [name], items: [{name, amount, sharedBy: [name]}],
-//         servicePct, taxPct, taxOnService, discount }
+//         servicePct, taxPct, taxOnService, discount, discountPct }
 export function calcShares(bill) {
   const people = bill.participants ?? [];
   const empty = { people: [], subtotal: 0, service: 0, tax: 0, discount: 0, total: 0 };
@@ -57,8 +57,10 @@ export function calcShares(bill) {
   const taxes = allocate(Math.round(tax), weights);
   const charged = subs.reduce((a, b) => a + b, 0) + svcs.reduce((a, b) => a + b, 0) + taxes.reduce((a, b) => a + b, 0);
   // Flat per head, not proportional — a Rp 50k voucher is worth the same to everyone.
-  // Capped at the bill so the total can never go negative.
-  const discount = Math.min(Math.max(0, Math.round(Number(bill.discount) || 0)), charged);
+  // Rupiah and percent stack (10% off *and* a voucher), then cap at the bill so
+  // the total can never go negative.
+  const off = (Number(bill.discount) || 0) + (charged * (Number(bill.discountPct) || 0)) / 100;
+  const discount = Math.min(Math.max(0, Math.round(off)), charged);
   const discs = allocate(discount, people.map(() => 1));
 
   return {

@@ -64,6 +64,23 @@ import { allocate, calcShares, waLink, waNumber } from './split.js';
   assert.equal(calcShares({ ...base, discount: 'abc' }).total, 300000);
   assert.equal(calcShares({ ...base }).discount, 0);
   assert.equal(calcShares({ discount: 1000 }).total, 0); // no participants
+
+  // percent discount, on the charged total (subtotal + service + tax)
+  const pct = calcShares({ ...base, discountPct: 10 });
+  assert.equal(pct.discount, 30000);
+  assert.equal(pct.total, 270000);
+  const withCharges = calcShares({ ...base, servicePct: 5, taxPct: 11, discountPct: 10 });
+  assert.equal(withCharges.discount, Math.round(349650 * 0.1)); // 300000 + 15000 + 34650
+  assert.equal(withCharges.total, 349650 - withCharges.discount);
+  // rupiah + percent stack, still capped
+  assert.equal(calcShares({ ...base, discount: 50000, discountPct: 10 }).discount, 80000);
+  assert.equal(calcShares({ ...base, discount: 50000, discountPct: 200 }).total, 0);
+  assert.equal(calcShares({ ...base, discountPct: -10 }).discount, 0);
+  assert.equal(calcShares({ ...base, discountPct: 'x' }).discount, 0);
+  // odd percent still sums exactly per person
+  const odd3 = calcShares({ ...base, discountPct: 3.33 });
+  assert.equal(odd3.people.reduce((a, p) => a + p.discount, 0), odd3.discount);
+  assert.equal(odd3.people.reduce((a, p) => a + p.total, 0), odd3.total);
 }
 
 // 3. Reconciliation under nasty rounding: shares must always sum to the total.
