@@ -86,6 +86,14 @@
     transition: border-color var(--tap) var(--ease), background-color var(--tap) var(--ease);
   }
   input:focus { border-color: var(--accent); }
+  /* The date field keeps the native picker but wears a readable face: "29 Jul 2026"
+     sits over the browser's own 29/07/2026, and steps aside while you're typing in it. */
+  .datefield { position: relative; }
+  .datefield span {
+    position: absolute; inset: 1px 38px 1px 12px; display: flex; align-items: center;
+    background: var(--bg); border-radius: 10px; pointer-events: none;
+  }
+  .datefield input:focus + span, .datefield span:empty { display: none; }
   .money { text-align: right; font-variant-numeric: tabular-nums; }
   ::placeholder { color: var(--muted); opacity: 1; }
   input:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
@@ -178,7 +186,9 @@
   <section>
     <div class="grid2">
       <div><label for="title">What / where</label><input id="title" type="text" placeholder="Dinner at Sate Khas" maxlength="80"></div>
-      <div><label for="date">Date</label><input id="date" type="date"></div>
+      <div><label for="date">Date</label>
+        <div class="datefield"><input id="date" type="date"><span id="dateText" aria-hidden="true"></span></div>
+      </div>
     </div>
   </section>
 
@@ -251,7 +261,7 @@
         crossorigin="anonymous" referrerpolicy="no-referrer" defer></script>
 
 <script type="module">
-import { calcShares, digits, group, money, setMoneySeparator, waLink } from './split.js';
+import { calcShares, digits, fmtDate, group, money, setMoneySeparator, waLink } from './split.js';
 
 const KEY = 'split-bill';
 const $ = (id) => document.getElementById(id);
@@ -358,11 +368,14 @@ const markNew = (boxId, sel) => $(boxId).querySelector(`${sel}:last-of-type`)?.c
 
 // --- header + charges -------------------------------------------------------
 const MONEY = new Set(['svcAmt', 'taxAmt', 'disc']);
-const paintFields = () => { for (const [id, key] of FIELDS) $(id).value = MONEY.has(id) ? group(bill[key]) : bill[key]; };
+const paintFields = () => {
+  for (const [id, key] of FIELDS) $(id).value = MONEY.has(id) ? group(bill[key]) : bill[key];
+  $('dateText').textContent = fmtDate(bill.date);
+};
 paintFields();
 for (const [id, key] of FIELDS) {
   if (MONEY.has(id)) onMoneyInput($(id), (raw) => { bill[key] = raw; save(); renderSummary(); });
-  else $(id).oninput = () => { bill[key] = $(id).value; save(); renderSummary(); };
+  else $(id).oninput = () => { bill[key] = $(id).value; save(); $('dateText').textContent = fmtDate(bill.date); renderSummary(); };
 }
 
 $('sep').value = sep;
@@ -484,7 +497,7 @@ $('addItem').onclick = () => {
 // --- summary + sharing ------------------------------------------------------
 let result = { people: [], subtotal: 0, service: 0, tax: 0, total: 0 };
 
-const label = () => `${bill.title?.trim() || 'Split Bill'}${bill.date ? ` (${bill.date})` : ''}`;
+const label = () => `${bill.title?.trim() || 'Split Bill'}${fmtDate(bill.date) ? ` (${fmtDate(bill.date)})` : ''}`;
 // "Service 5%" when a percentage drives it, plain "Service" when it's a flat amount.
 const chargeLabel = (name, pct) => `${name}${Number(pct) ? ` ${pct}%` : ''}`;
 
@@ -559,7 +572,7 @@ function buildPdf() {
   const rule = () => { page(10); doc.setDrawColor(210).line(M, y - 9, RIGHT, y - 9); };
 
   line(bill.title?.trim() || 'Split Bill', null, { size: 17, bold: true, gap: 20 });
-  line(bill.date || '', `Total  Rp ${money(result.total)}`, { size: 10, gap: 24 });
+  line(fmtDate(bill.date), `Total  Rp ${money(result.total)}`, { size: 10, gap: 24 });
 
   line('ITEMS', null, { size: 9, bold: true, gap: 16 });
   for (const it of bill.items) {

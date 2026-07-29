@@ -1,6 +1,6 @@
 // node test.mjs  — fails loudly if the money math breaks.
 import assert from 'node:assert/strict';
-import { calcShares, digits, group, money, roundToSum, setMoneySeparator, waLink, waNumber } from './split.js';
+import { calcShares, digits, fmtDate, group, money, roundToSum, setMoneySeparator, waLink, waNumber } from './split.js';
 
 // 1. The example from the brief: equal split per item, nobody pays for what they didn't eat.
 {
@@ -264,6 +264,12 @@ assert.equal(waNumber(undefined), null);
 assert.equal(waNumber('123'), null); // too short
 assert.ok(waLink('08123456789', 'hi').startsWith('https://wa.me/628123456789?text=hi'));
 assert.ok(waLink('', 'a b').startsWith('https://wa.me/?text=a%20b')); // no number = picker
+
+// 6. Dates read the way people say them, and a blank one stays blank.
+assert.equal(fmtDate('2026-07-29'), '29 Jul 2026');
+assert.equal(fmtDate('2026-01-01'), '01 Jan 2026'); // no timezone slip onto Dec 31
+assert.equal(fmtDate(''), '');
+assert.equal(fmtDate(undefined), '');
 
 console.log('ok');
 

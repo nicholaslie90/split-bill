@@ -113,6 +113,13 @@ export const setMoneySeparator = (s) => {
 };
 export const money = (n) => new Intl.NumberFormat(locale).format(Math.round(n));
 
+// yyyy-mm-dd -> "29 Jul 2026". Noon, not midnight, so no timezone can drag the
+// date onto the day before. Anything unparseable comes back as the empty string.
+export const fmtDate = (iso) => {
+  const d = new Date(`${iso}T12:00:00`);
+  return isNaN(d) ? '' : d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+};
+
 // What's typed into a money field -> the whole rupiah behind it, and back out
 // grouped for display. Digits only: no cents in IDR, and a decimal point would
 // be ambiguous the moment the separator is a dot.
