@@ -3,7 +3,10 @@
 
 // Hand `total` out across `weights` as integers that sum to exactly `total`.
 // Largest-remainder (Hare quota): floor everything, then give the leftover
-// units to whoever got robbed hardest by the floor.
+// units to whoever got robbed hardest by the floor. Ordering by remainder is
+// what makes this round half-up: a .51 share is always served before a .49 one,
+// so every value is its half-up rounding except where the total makes that
+// impossible (two shares of exactly .5 can't both round up and still sum right).
 export function allocate(total, weights) {
   const n = weights.length;
   if (!n) return [];
@@ -64,10 +67,15 @@ export function calcShares(bill) {
   const discount = Math.min(Math.max(0, Math.round(off)), charged);
   const discs = allocate(discount, people.map(() => 1));
 
+  // Each person's item lines are handed out of that person's own subtotal, so the
+  // lines they read always add up to the number they're asked to pay. Rounding
+  // each line on its own drifts by a rupiah either way.
+  const lineAmts = people.map((_, i) => allocate(subs[i], lines[i].map((l) => l.share)));
+
   return {
     people: people.map((name, i) => ({
       name,
-      lines: lines[i],
+      lines: lines[i].map((l, k) => ({ ...l, share: lineAmts[i][k] })),
       subtotal: subs[i],
       service: svcs[i],
       tax: taxes[i],

@@ -146,6 +146,31 @@ assert.equal(calcShares({ participants: ['A'], items: [] }).total, 0);
 }
 assert.deepEqual(allocate(10, [1, 1, 1]), [4, 3, 3]); // deterministic leftover order
 
+// 4b. Half-up rounding: .51 rounds up, .49 stays put.
+assert.deepEqual(allocate(3428, [1142.51, 1142.49, 1143]), [1143, 1142, 1143]);
+// A .5 tie can't round both ways and still sum to the bill — one has to give.
+assert.deepEqual(allocate(2285, [1, 1]), [1143, 1142]);
+{
+  // Item lines must add up to the subtotal they explain, for everyone, always.
+  for (const amount of [2285, 1142.51, 33333, 7, 99999]) {
+    const r = calcShares({
+      participants: ['A', 'B', 'C'],
+      items: [
+        { name: 'shared', amount, sharedBy: [] },
+        { name: 'pair', amount: amount / 3, sharedBy: ['A', 'B'] },
+        { name: 'solo', amount: 1234.56, sharedBy: ['C'] },
+      ],
+      servicePct: 5, taxPct: 11,
+    });
+    for (const p of r.people) {
+      const lines = p.lines.reduce((a, l) => a + l.share, 0);
+      assert.equal(lines, p.subtotal, `${p.name} lines ${lines} != subtotal ${p.subtotal} (amount ${amount})`);
+      assert.ok(p.lines.every((l) => Number.isInteger(l.share)), 'lines are whole rupiah');
+    }
+    assert.equal(r.people.reduce((a, p) => a + p.total, 0), r.total);
+  }
+}
+
 // 5. Optional phone number -> wa.me digits. Blank/garbage must fall back to the contact picker.
 assert.equal(waNumber('08123456789'), '628123456789');
 assert.equal(waNumber('+62 812-3456-789'), '628123456789');
