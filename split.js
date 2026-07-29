@@ -104,6 +104,15 @@ export function calcShares(bill) {
   };
 }
 
+// The other side of the ledger for whoever fronted the bill ("nalangin"): who
+// owes them, and how much they should get back. Their own share stays theirs, so
+// `due` plus their own total is always the bill total. People who owe nothing are
+// left off the list.
+export function collect(result, payer) {
+  const owed = result.people.filter((p) => p.name !== payer && p.total !== 0);
+  return { owed, due: owed.reduce((a, p) => a + p.total, 0) };
+}
+
 // Thousands separator is a preference: dots (Indonesian) or commas.
 let sep = '.';
 let locale = 'id-ID';

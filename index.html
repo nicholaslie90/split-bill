@@ -132,6 +132,8 @@
   .person { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
   .person input:first-child { flex: 1 1 40%; }
   .person input:nth-child(2) { flex: 1 1 60%; }
+  /* Who fronted the bill. Big enough to hit with a thumb. */
+  .person input[type=checkbox] { flex: 0 0 auto; width: 20px; height: 20px; accent-color: var(--accent); }
   .item { border-top: 1px solid var(--line); padding-top: 10px; margin-top: 10px; }
   .item:first-child { border-top: 0; padding-top: 0; margin-top: 0; }
   .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
@@ -196,7 +198,7 @@
     <h2>Participants</h2>
     <div id="people"></div>
     <button id="addPerson">+ Add participant</button>
-    <p class="hint" style="margin-top:8px">Phone is optional — leave it blank and WhatsApp will ask you who to send to.</p>
+    <p class="hint" style="margin-top:8px">Phone is optional — leave it blank and WhatsApp will ask you who to send to. Tick the box to mark who paid the whole bill up front.</p>
   </section>
 
   <section>
@@ -271,7 +273,7 @@
         crossorigin="anonymous" referrerpolicy="no-referrer" defer></script>
 
 <script type="module">
-import { calcShares, digits, fmtDate, group, money, setMoneySeparator, waLink } from './split.js';
+import { calcShares, collect, digits, fmtDate, group, money, setMoneySeparator, waLink } from './split.js';
 
 const KEY = 'split-bill';
 const $ = (id) => document.getElementById(id);
@@ -285,7 +287,7 @@ function el(tag, props = {}, kids = []) {
 
 const blank = () => ({
   title: '', date: new Date().toISOString().slice(0, 10),
-  participants: [], phones: {}, items: [],
+  participants: [], phones: {}, paidBy: '', items: [],
   servicePct: 5, serviceAmt: '', taxPct: 11, taxAmt: '', taxOnService: true,
   discount: '', discountPct: '', roundTo: 0,
   payName: '', payBank: '', payAcct: '',
@@ -312,6 +314,8 @@ bill.items = (Array.isArray(bill.items) ? bill.items : []).map((it) => ({
 }));
 for (const k of ['serviceAmt', 'taxAmt', 'discount']) bill[k] = rupiah(bill[k]);
 if (!bill.phones || typeof bill.phones !== 'object') bill.phones = {};
+// Only a current participant can be the one who fronted the bill.
+if (!bill.participants.includes(bill.paidBy)) bill.paidBy = '';
 
 const save = () => localStorage.setItem(KEY, JSON.stringify(bill));
 
@@ -415,6 +419,7 @@ function renderPeople() {
       const phone = bill.phones[name];
       delete bill.phones[name];
       if (phone) bill.phones[next] = phone;
+      if (bill.paidBy === name) bill.paidBy = next;
       bill.items.forEach((it) => { it.sharedBy = it.sharedBy.map((p) => (p === name ? next : p)); });
       bill.participants[i] = next;
       save(); renderAll();
@@ -424,17 +429,25 @@ function renderPeople() {
       if (v) bill.phones[bill.participants[i]] = v; else delete bill.phones[bill.participants[i]];
       save(); renderSummary();
     };
+    // Who paid the whole bill up front. One person at most — ticking someone
+    // else moves the mark, and unticking clears it.
+    const paid = el('input', {
+      type: 'checkbox', checked: bill.paidBy === name,
+      title: `${name} paid the whole bill up front`, ariaLabel: `${name} paid the whole bill up front`,
+      onchange: () => { bill.paidBy = paid.checked ? name : ''; save(); renderAll(); },
+    });
     const del = el('button', {
       className: 'icon', title: `Remove ${name}`, textContent: '✕',
       onclick: async () => {
         await swipeOut(del.closest('.person'));
         bill.participants.splice(i, 1);
         delete bill.phones[name];
+        if (bill.paidBy === name) bill.paidBy = '';
         bill.items.forEach((it) => { it.sharedBy = it.sharedBy.filter((p) => p !== name); });
         save(); renderAll();
       },
     });
-    box.append(el('div', { className: 'person' }, [nameIn, phoneIn, del]));
+    box.append(el('div', { className: 'person' }, [nameIn, phoneIn, paid, del]));
   });
   if (!bill.participants.length) box.append(el('p', { className: 'hint', textContent: 'Add the people sharing this bill.' }));
 }
@@ -522,7 +535,19 @@ function payLines() {
 }
 
 // The message each person receives. Same numbers as the PDF, just plain text.
+// Whoever fronted the bill gets the mirror image: not what they owe, but what
+// they're owed and by whom.
 function messageFor(p) {
+  if (p.name === bill.paidBy) {
+    const { owed, due } = collect(result, p.name);
+    return [
+      `*${label()}*`, '',
+      `Hi ${p.name}, you paid *Rp ${money(result.total)}* up front.`, '',
+      `You should get back *Rp ${money(due)}*:`,
+      ...owed.map((o) => `• ${o.name} — Rp ${money(o.total)}`),
+      '', `Your own share: Rp ${money(p.total)}`,
+    ].join('\n');
+  }
   const lines = p.lines.map((l) => `• ${l.name || 'Item'} — Rp ${money(l.share)}${l.sharedBy > 1 ? ` (split ${l.sharedBy})` : ''}`);
   const extras = [
     p.service ? `Service: Rp ${money(p.service)}` : null,
@@ -534,6 +559,7 @@ function messageFor(p) {
   return [
     `*${label()}*`, '', `Hi ${p.name}, your share is *Rp ${money(p.total)}*`, '',
     ...lines, ...(lines.length ? [`Subtotal: Rp ${money(p.subtotal)}`] : []), ...extras,
+    ...(bill.paidBy ? ['', `${bill.paidBy} paid the bill up front.`] : []),
     ...(pay.length ? ['', 'Transfer to:', ...pay] : []),
   ].join('\n');
 }
@@ -547,18 +573,21 @@ function renderSummary() {
     return;
   }
   for (const p of result.people) {
+    const payer = p.name === bill.paidBy;
     const left = el('div', {}, [el('b', { textContent: p.name })]);
+    if (payer) left.append(el('span', { className: 'hint', textContent: ' · paid up front' }));
     if (p.lines.length) {
       left.append(el('ul', {}, p.lines.map((l) =>
         el('li', { textContent: `${l.name || 'Item'} — ${money(l.share)}${l.sharedBy > 1 ? ` (÷${l.sharedBy})` : ''}` }))));
     }
     const wa = el('button', {
       className: 'wa', textContent: bill.phones[p.name] ? '▸ WhatsApp' : '▸ WhatsApp…',
-      title: bill.phones[p.name] ? `Send to ${bill.phones[p.name]}` : 'Pick the contact in WhatsApp',
+      title: payer ? 'Send them who owes what' : bill.phones[p.name] ? `Send to ${bill.phones[p.name]}` : 'Pick the contact in WhatsApp',
       onclick: () => window.open(waLink(bill.phones[p.name], messageFor(p)), '_blank', 'noopener'),
     });
     const right = el('div', { style: 'text-align:right; white-space:nowrap' }, [
       el('div', {}, [el('b', { textContent: `Rp ${money(p.total)}` })]),
+      payer ? el('div', { className: 'hint', textContent: `gets back Rp ${money(collect(result, p.name).due)}` }) : null,
       el('div', { style: 'margin-top:6px' }, [wa]),
     ]);
     box.append(el('div', { className: 'share' }, [left, right]));
@@ -607,11 +636,14 @@ function buildPdf() {
   if (result.tax) line(chargeLabel('Tax', bill.taxPct), `Rp ${money(result.tax)}`);
   if (result.discount) line(`${chargeLabel('Discount', bill.discountPct)} (split ${result.people.length})`, `- Rp ${money(result.discount)}`);
   if (result.rounding) line(`Rounding (split ${result.people.length})`, `- Rp ${money(result.rounding)}`);
-  line('TOTAL', `Rp ${money(result.total)}`, { size: 12, bold: true, gap: 28 });
+  line('TOTAL', `Rp ${money(result.total)}`, { size: 12, bold: true, gap: bill.paidBy ? 18 : 28 });
+  if (bill.paidBy) {
+    line(`${bill.paidBy} paid up front`, `owed Rp ${money(collect(result, bill.paidBy).due)}`, { gap: 28 });
+  }
 
   line('WHO PAYS WHAT', null, { size: 9, bold: true, gap: 16 });
   for (const p of result.people) {
-    line(p.name, `Rp ${money(p.total)}`, { size: 11, bold: true });
+    line(`${p.name}${p.name === bill.paidBy ? ' (paid up front)' : ''}`, `Rp ${money(p.total)}`, { size: 11, bold: true });
     for (const l of p.lines) {
       line(`${l.name || 'Item'}${l.sharedBy > 1 ? ` (split ${l.sharedBy})` : ''}`, `Rp ${money(l.share)}`, { size: 9, gap: 13, indent: 12 });
     }

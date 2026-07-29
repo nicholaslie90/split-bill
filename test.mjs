@@ -1,6 +1,6 @@
 // node test.mjs  — fails loudly if the money math breaks.
 import assert from 'node:assert/strict';
-import { calcShares, digits, fmtDate, group, money, roundToSum, setMoneySeparator, waLink, waNumber } from './split.js';
+import { calcShares, collect, digits, fmtDate, group, money, roundToSum, setMoneySeparator, waLink, waNumber } from './split.js';
 
 // 1. The example from the brief: equal split per item, nobody pays for what they didn't eat.
 {
@@ -250,6 +250,35 @@ assert.deepEqual(roundToSum([1142.5, 1142.5], 2285), [1143, 1142]);
   assert.equal(group('59000'), '59,000');
   setMoneySeparator('.'); // back to the default for anything after this
   assert.equal(money(1000), '1.000');
+}
+
+// 4e. Whoever fronted the bill: what they're owed plus their own share is the
+// whole bill, exactly — otherwise they'd be out of pocket or up on the deal.
+{
+  const r = calcShares({
+    participants: ['Fav', 'Dwita', 'Titin', 'Fenny'],
+    items: [
+      { name: 'krapao', amount: 130000, sharedBy: ['Dwita', 'Titin'] },
+      { name: 'wings', amount: 49000, sharedBy: ['Fenny'] },
+      { name: 'noodle', amount: 59000, sharedBy: ['Fav'] },
+    ],
+    servicePct: 5, taxPct: 11, discount: 12345, roundTo: 500,
+  });
+  for (const payer of r.people) {
+    const { owed, due } = collect(r, payer.name);
+    assert.equal(due + payer.total, r.total, `${payer.name} fronted it: ${due} + ${payer.total} != ${r.total}`);
+    assert.ok(!owed.some((o) => o.name === payer.name), 'the payer never owes themselves');
+  }
+  // nobody marked -> the whole bill is owed by the four of them
+  assert.equal(collect(r, '').due, r.total);
+  // people who owe nothing are left off the list; a voucher-holder still shows,
+  // as a negative — the payer owes them, and the sum must still reconcile.
+  const voucher = calcShares({ participants: ['A', 'B'], items: [{ name: 'x', amount: 100, sharedBy: ['A'] }], discount: 200 });
+  assert.deepEqual(voucher.people.map((p) => p.total), [50, -50]); // discount capped at 100, split evenly
+  assert.deepEqual(collect(voucher, 'A').owed.map((o) => o.total), [-50]);
+  assert.equal(collect(voucher, 'A').due + 50, voucher.total);
+  const nil = calcShares({ participants: ['A', 'B'], items: [{ name: 'x', amount: 100, sharedBy: ['A'] }] });
+  assert.deepEqual(collect(nil, 'A').owed, []); // B ordered nothing, so B is not on the list
 }
 
 // 5. Optional phone number -> wa.me digits. Blank/garbage must fall back to the contact picker.

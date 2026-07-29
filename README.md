@@ -12,6 +12,7 @@ Split a restaurant bill by item, then send each person their share on WhatsApp.
 - Each person's total is the plain half-up rounding of what they actually owe — `.5` and up goes up, below stays put — and the shares still add up to the bill exactly. Where arithmetic makes both impossible (two shares of exactly `.5`), one person gives a single rupiah rather than the bill going out by one.
 - **PDF** of the whole bill: on a phone the share sheet hands it straight to WhatsApp; on desktop it downloads.
 - **▸ WhatsApp** per person: opens WhatsApp with their itemised share prefilled. Add their phone number to go straight to the chat, or leave it blank and pick the contact in WhatsApp.
+- Tick who paid the whole bill up front ("nalangin") and their message flips around: what they laid out, who owes them, and how much should come back. Everyone else's message names them, so nobody has to ask who to pay. What comes back plus the payer's own share is always the bill exactly.
 - No accounts, no server. The bill lives in your browser's `localStorage`.
 
 ## Files
