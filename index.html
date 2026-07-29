@@ -587,9 +587,20 @@ const KEEP = $('scanNote').textContent; // the standing best-effort caveat
 const cam = $('cam');
 const feed = $('feed');
 let stream;
-const stopCam = () => { stream?.getTracks().forEach((t) => t.stop()); stream = null; };
+// Releasing the camera is the one thing here that must never be missed — a live
+// stream means the indicator light stays on after the user thinks they're done.
+// Idempotent, so every path can call it without checking whether another did.
+const stopCam = () => {
+  stream?.getTracks().forEach((t) => t.stop());
+  stream = null;
+  feed.srcObject = null;
+};
 const closeCam = () => { stopCam(); if (cam.open) cam.close(); };
-cam.onclose = stopCam; // Esc and the backdrop close the dialog on their own
+// Escape closes a modal dialog by itself, and it turns out `close` is not
+// reliably delivered when it does — Chrome fires `cancel` and nothing else. So
+// listen for both rather than trusting either one to be the whole story.
+cam.oncancel = stopCam;
+cam.onclose = stopCam;
 
 $('scan').onclick = async () => {
   // No camera API (or an insecure origin, where the browser hides it): just
