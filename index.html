@@ -100,7 +100,7 @@
   </section>
 
   <section>
-    <h2>Service &amp; tax</h2>
+    <h2>Service, tax &amp; discount</h2>
     <div class="grid2">
       <div><label for="svc">Service charge %</label><input id="svc" type="number" min="-100" max="100" step="0.1" inputmode="decimal"></div>
       <div><label for="tax">Tax / PPN %</label><input id="tax" type="number" min="-100" max="100" step="0.1" inputmode="decimal"></div>
@@ -108,6 +108,10 @@
     <label style="margin-top:10px; display:flex; gap:8px; align-items:center">
       <input id="tos" type="checkbox" style="width:auto"> Charge tax on top of the service charge
     </label>
+    <div style="margin-top:10px">
+      <label for="disc">Discount (Rp) — split evenly per person</label>
+      <input id="disc" type="number" min="0" step="1" inputmode="decimal">
+    </div>
   </section>
 
   <section>
@@ -145,8 +149,10 @@ function el(tag, props = {}, kids = []) {
 const blank = () => ({
   title: '', date: new Date().toISOString().slice(0, 10),
   participants: [], phones: {}, items: [],
-  servicePct: 5, taxPct: 11, taxOnService: true,
+  servicePct: 5, taxPct: 11, taxOnService: true, discount: '',
 });
+
+const FIELDS = [['title', 'title'], ['date', 'date'], ['svc', 'servicePct'], ['tax', 'taxPct'], ['disc', 'discount']];
 
 let bill;
 try { bill = { ...blank(), ...JSON.parse(localStorage.getItem(KEY) || '{}') }; }
@@ -162,7 +168,7 @@ if (!bill.phones || typeof bill.phones !== 'object') bill.phones = {};
 const save = () => localStorage.setItem(KEY, JSON.stringify(bill));
 
 // --- header + charges -------------------------------------------------------
-for (const [id, key] of [['title', 'title'], ['date', 'date'], ['svc', 'servicePct'], ['tax', 'taxPct']]) {
+for (const [id, key] of FIELDS) {
   $(id).value = bill[key];
   $(id).oninput = () => { bill[key] = $(id).value; save(); renderSummary(); };
 }
@@ -272,6 +278,7 @@ function messageFor(p) {
   const extras = [
     p.service ? `Service: Rp ${money(p.service)}` : null,
     p.tax ? `Tax: Rp ${money(p.tax)}` : null,
+    p.discount ? `Discount: −Rp ${money(p.discount)}` : null,
   ].filter(Boolean);
   return [
     `*${label()}*`, '', `Hi ${p.name}, your share is *Rp ${money(p.total)}*`, '',
@@ -308,6 +315,7 @@ function renderSummary() {
   t.append(el('div', {}, [el('span', { textContent: 'Subtotal' }), el('span', { textContent: `Rp ${money(result.subtotal)}` })]));
   if (result.service) t.append(el('div', {}, [el('span', { textContent: `Service ${bill.servicePct}%` }), el('span', { textContent: `Rp ${money(result.service)}` })]));
   if (result.tax) t.append(el('div', {}, [el('span', { textContent: `Tax ${bill.taxPct}%` }), el('span', { textContent: `Rp ${money(result.tax)}` })]));
+  if (result.discount) t.append(el('div', {}, [el('span', { textContent: `Discount (÷${result.people.length})` }), el('span', { textContent: `− Rp ${money(result.discount)}` })]));
   t.append(el('div', { className: 'grand' }, [el('span', { textContent: 'Total' }), el('span', { textContent: `Rp ${money(result.total)}` })]));
   box.append(t);
 }
@@ -344,6 +352,7 @@ function buildPdf() {
   line('Subtotal', `Rp ${money(result.subtotal)}`, { bold: true });
   if (result.service) line(`Service charge ${bill.servicePct}%`, `Rp ${money(result.service)}`);
   if (result.tax) line(`Tax ${bill.taxPct}%`, `Rp ${money(result.tax)}`);
+  if (result.discount) line(`Discount (split ${result.people.length})`, `- Rp ${money(result.discount)}`);
   line('TOTAL', `Rp ${money(result.total)}`, { size: 12, bold: true, gap: 28 });
 
   line('WHO PAYS WHAT', null, { size: 9, bold: true, gap: 16 });
@@ -354,6 +363,7 @@ function buildPdf() {
     }
     if (p.service) line('Service charge', `Rp ${money(p.service)}`, { size: 9, gap: 13, indent: 12 });
     if (p.tax) line('Tax', `Rp ${money(p.tax)}`, { size: 9, gap: 13, indent: 12 });
+    if (p.discount) line('Discount', `- Rp ${money(p.discount)}`, { size: 9, gap: 13, indent: 12 });
     y += 6;
   }
   return doc;
@@ -385,7 +395,7 @@ $('reset').onclick = () => {
   if (!confirm('Clear this bill and start over?')) return;
   bill = blank();
   save();
-  for (const [id, key] of [['title', 'title'], ['date', 'date'], ['svc', 'servicePct'], ['tax', 'taxPct']]) $(id).value = bill[key];
+  for (const [id, key] of FIELDS) $(id).value = bill[key];
   $('tos').checked = true;
   renderAll();
 };

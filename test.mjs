@@ -40,6 +40,32 @@ import { allocate, calcShares, waLink, waNumber } from './split.js';
   assert.equal(r.tax, 22000); // 11% of subtotal only
 }
 
+// 2b. Discount: flat per head, reconciles, capped at the bill.
+{
+  const base = { participants: ['A', 'B', 'C'], items: [{ name: 'x', amount: 300000, sharedBy: ['A'] }] };
+  const r = calcShares({ ...base, discount: 30000 });
+  assert.equal(r.discount, 30000);
+  assert.equal(r.total, 270000);
+  assert.deepEqual(r.people.map((p) => p.discount), [10000, 10000, 10000]);
+  assert.deepEqual(r.people.map((p) => p.total), [290000, -10000, -10000]); // B and C owe nothing but hold a voucher
+
+  // odd amount still sums exactly
+  const odd = calcShares({ ...base, discount: 10000 });
+  assert.equal(odd.people.reduce((a, p) => a + p.total, 0), odd.total);
+  assert.equal(odd.people.reduce((a, p) => a + p.discount, 0), 10000);
+
+  // discount bigger than the bill is capped, never a negative total
+  const big = calcShares({ ...base, discount: 999999999 });
+  assert.equal(big.total, 0);
+  assert.equal(big.discount, 300000);
+
+  // garbage / negative input is ignored
+  assert.equal(calcShares({ ...base, discount: -5000 }).total, 300000);
+  assert.equal(calcShares({ ...base, discount: 'abc' }).total, 300000);
+  assert.equal(calcShares({ ...base }).discount, 0);
+  assert.equal(calcShares({ discount: 1000 }).total, 0); // no participants
+}
+
 // 3. Reconciliation under nasty rounding: shares must always sum to the total.
 for (const n of [3, 6, 7, 11]) {
   for (const amount of [10000, 33333, 1, 99999]) {
@@ -52,10 +78,11 @@ for (const n of [3, 6, 7, 11]) {
       ],
       servicePct: 5,
       taxPct: 11,
+      discount: amount % 7 ? 1234 : 0,
     });
     const sum = r.people.reduce((a, p) => a + p.total, 0);
     assert.equal(sum, r.total, `n=${n} amount=${amount}: ${sum} != ${r.total}`);
-    assert.equal(r.total, r.subtotal + r.service + r.tax);
+    assert.equal(r.total, r.subtotal + r.service + r.tax - r.discount);
     assert.ok(r.people[0].total > r.people[1].total, 'solo item must land on p0 only');
   }
 }

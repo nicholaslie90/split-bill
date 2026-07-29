@@ -23,10 +23,10 @@ export function allocate(total, weights) {
 }
 
 // bill: { participants: [name], items: [{name, amount, sharedBy: [name]}],
-//         servicePct, taxPct, taxOnService }
+//         servicePct, taxPct, taxOnService, discount }
 export function calcShares(bill) {
   const people = bill.participants ?? [];
-  const empty = { people: [], subtotal: 0, service: 0, tax: 0, total: 0 };
+  const empty = { people: [], subtotal: 0, service: 0, tax: 0, discount: 0, total: 0 };
   if (!people.length) return empty;
 
   // Exact (fractional) item slices per person. These double as the weights
@@ -55,6 +55,11 @@ export function calcShares(bill) {
   const subs = allocate(Math.round(gross), weights);
   const svcs = allocate(Math.round(service), weights);
   const taxes = allocate(Math.round(tax), weights);
+  const charged = subs.reduce((a, b) => a + b, 0) + svcs.reduce((a, b) => a + b, 0) + taxes.reduce((a, b) => a + b, 0);
+  // Flat per head, not proportional — a Rp 50k voucher is worth the same to everyone.
+  // Capped at the bill so the total can never go negative.
+  const discount = Math.min(Math.max(0, Math.round(Number(bill.discount) || 0)), charged);
+  const discs = allocate(discount, people.map(() => 1));
 
   return {
     people: people.map((name, i) => ({
@@ -63,12 +68,14 @@ export function calcShares(bill) {
       subtotal: subs[i],
       service: svcs[i],
       tax: taxes[i],
-      total: subs[i] + svcs[i] + taxes[i],
+      discount: discs[i],
+      total: subs[i] + svcs[i] + taxes[i] - discs[i],
     })),
     subtotal: Math.round(gross),
     service: Math.round(service),
     tax: Math.round(tax),
-    total: Math.round(gross) + Math.round(service) + Math.round(tax),
+    discount,
+    total: charged - discount,
   };
 }
 
