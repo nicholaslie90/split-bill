@@ -242,6 +242,16 @@
   </section>
 
   <section>
+    <h2>Transfer to</h2>
+    <div class="grid2">
+      <div><label for="payName">Account name</label><input id="payName" type="text" placeholder="Budi Santoso" maxlength="60"></div>
+      <div><label for="payBank">Bank</label><input id="payBank" type="text" placeholder="BCA" maxlength="30"></div>
+    </div>
+    <div style="margin-top:10px"><label for="payAcct">Account number</label><input id="payAcct" type="text" inputmode="numeric" placeholder="1234567890" maxlength="34"></div>
+    <p class="hint" style="margin-top:6px">Optional — added to each WhatsApp message and the PDF.</p>
+  </section>
+
+  <section>
     <h2>Who pays what</h2>
     <div id="summary"></div>
   </section>
@@ -278,12 +288,14 @@ const blank = () => ({
   participants: [], phones: {}, items: [],
   servicePct: 5, serviceAmt: '', taxPct: 11, taxAmt: '', taxOnService: true,
   discount: '', discountPct: '', roundTo: 0,
+  payName: '', payBank: '', payAcct: '',
 });
 
 const FIELDS = [['title', 'title'], ['date', 'date'],
                 ['svc', 'servicePct'], ['svcAmt', 'serviceAmt'],
                 ['tax', 'taxPct'], ['taxAmt', 'taxAmt'],
-                ['disc', 'discount'], ['discPct', 'discountPct'], ['roundTo', 'roundTo']];
+                ['disc', 'discount'], ['discPct', 'discountPct'], ['roundTo', 'roundTo'],
+                ['payName', 'payName'], ['payBank', 'payBank'], ['payAcct', 'payAcct']];
 
 let bill;
 try { bill = { ...blank(), ...JSON.parse(localStorage.getItem(KEY) || '{}') }; }
@@ -501,6 +513,14 @@ const label = () => `${bill.title?.trim() || 'Split Bill'}${fmtDate(bill.date) ?
 // "Service 5%" when a percentage drives it, plain "Service" when it's a flat amount.
 const chargeLabel = (name, pct) => `${name}${Number(pct) ? ` ${pct}%` : ''}`;
 
+// Where to send the money. Two lines at most — "BCA 1234567890" / "a.n. Budi" —
+// and nothing at all when none of the three fields is filled in.
+function payLines() {
+  const [name, bank, acct] = ['payName', 'payBank', 'payAcct'].map((k) => (bill[k] ?? '').trim());
+  const account = [bank, acct].filter(Boolean).join(' ');
+  return [account, name && `a.n. ${name}`].filter(Boolean);
+}
+
 // The message each person receives. Same numbers as the PDF, just plain text.
 function messageFor(p) {
   const lines = p.lines.map((l) => `• ${l.name || 'Item'} — Rp ${money(l.share)}${l.sharedBy > 1 ? ` (split ${l.sharedBy})` : ''}`);
@@ -510,9 +530,11 @@ function messageFor(p) {
     p.discount ? `Discount: −Rp ${money(p.discount)}` : null,
     p.rounding ? `Rounding: −Rp ${money(p.rounding)}` : null,
   ].filter(Boolean);
+  const pay = payLines();
   return [
     `*${label()}*`, '', `Hi ${p.name}, your share is *Rp ${money(p.total)}*`, '',
     ...lines, ...(lines.length ? [`Subtotal: Rp ${money(p.subtotal)}`] : []), ...extras,
+    ...(pay.length ? ['', 'Transfer to:', ...pay] : []),
   ].join('\n');
 }
 
@@ -598,6 +620,13 @@ function buildPdf() {
     if (p.discount) line('Discount', `- Rp ${money(p.discount)}`, { size: 9, gap: 13, indent: 12 });
     if (p.rounding) line('Rounding', `- Rp ${money(p.rounding)}`, { size: 9, gap: 13, indent: 12 });
     y += 6;
+  }
+
+  const pay = payLines();
+  if (pay.length) {
+    y += 8;
+    line('TRANSFER TO', null, { size: 9, bold: true, gap: 16 });
+    for (const l of pay) line(l, null, { size: 11 });
   }
   return doc;
 }
