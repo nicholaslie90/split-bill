@@ -1,6 +1,6 @@
 // node test.mjs  — fails loudly if the money math breaks.
 import assert from 'node:assert/strict';
-import { calcShares, roundToSum, waLink, waNumber } from './split.js';
+import { calcShares, digits, group, money, roundToSum, setMoneySeparator, waLink, waNumber } from './split.js';
 
 // 1. The example from the brief: equal split per item, nobody pays for what they didn't eat.
 {
@@ -228,6 +228,28 @@ assert.deepEqual(roundToSum([1142.5, 1142.5], 2285), [1143, 1142]);
     }
     assert.equal(r.people.reduce((a, p) => a + p.total, 0), r.total);
   }
+}
+
+// 4d. Money fields: digits in, grouped out, separator follows the preference.
+{
+  assert.equal(digits('59000'), '59000');
+  assert.equal(digits('Rp 59.000'), '59000'); // pasting a formatted amount works
+  assert.equal(digits('0059'), '59');         // leading zeros dropped
+  assert.equal(digits(''), '');
+  assert.equal(digits(undefined), '');
+  assert.equal(digits('12,34'), '1234');
+  setMoneySeparator('.');
+  assert.equal(group('59000'), '59.000');
+  assert.equal(group('1234567'), '1.234.567');
+  assert.equal(group('999'), '999');
+  assert.equal(group(''), '');
+  assert.equal(money(1234567), '1.234.567');
+  setMoneySeparator(',');
+  assert.equal(group('1234567'), '1,234,567');
+  assert.equal(money(1234567), '1,234,567');
+  assert.equal(group('59000'), '59,000');
+  setMoneySeparator('.'); // back to the default for anything after this
+  assert.equal(money(1000), '1.000');
 }
 
 // 5. Optional phone number -> wa.me digits. Blank/garbage must fall back to the contact picker.

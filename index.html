@@ -86,6 +86,7 @@
     transition: border-color var(--tap) var(--ease), background-color var(--tap) var(--ease);
   }
   input:focus { border-color: var(--accent); }
+  .money { text-align: right; font-variant-numeric: tabular-nums; }
   ::placeholder { color: var(--muted); opacity: 1; }
   input:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   .row { display: flex; gap: 8px; align-items: end; }
@@ -198,26 +199,35 @@
     <h2>Service, tax &amp; discount</h2>
     <div class="grid2">
       <div><label for="svc">Service charge %</label><input id="svc" type="number" min="-100" max="100" step="0.1" inputmode="decimal"></div>
-      <div><label for="svcAmt">Service charge (Rp)</label><input id="svcAmt" type="number" step="1" inputmode="decimal"></div>
+      <div><label for="svcAmt">Service charge (Rp)</label><input id="svcAmt" class="money" type="text" inputmode="numeric" maxlength="15"></div>
       <div><label for="tax">Tax / PPN %</label><input id="tax" type="number" min="-100" max="100" step="0.1" inputmode="decimal"></div>
-      <div><label for="taxAmt">Tax / PPN (Rp)</label><input id="taxAmt" type="number" step="1" inputmode="decimal"></div>
+      <div><label for="taxAmt">Tax / PPN (Rp)</label><input id="taxAmt" class="money" type="text" inputmode="numeric" maxlength="15"></div>
     </div>
     <label style="margin-top:10px; display:flex; gap:8px; align-items:center">
       <input id="tos" type="checkbox" style="width:auto"> Charge tax on top of the service charge
     </label>
     <div class="grid2" style="margin-top:10px">
-      <div><label for="disc">Discount (Rp)</label><input id="disc" type="number" min="0" step="1" inputmode="decimal"></div>
+      <div><label for="disc">Discount (Rp)</label><input id="disc" class="money" type="text" inputmode="numeric" maxlength="15"></div>
       <div><label for="discPct">Discount %</label><input id="discPct" type="number" min="0" max="100" step="0.1" inputmode="decimal"></div>
     </div>
     <p class="hint" style="margin-top:6px">Either one (or both) — the discount is split evenly per person.</p>
-    <div style="margin-top:10px">
-      <label for="roundTo">Round the total down to</label>
-      <select id="roundTo">
-        <option value="0">Don't round</option>
-        <option value="100">Nearest Rp 100</option>
-        <option value="500">Nearest Rp 500</option>
-        <option value="1000">Nearest Rp 1.000</option>
-      </select>
+    <div class="grid2" style="margin-top:10px">
+      <div>
+        <label for="roundTo">Round the total down to</label>
+        <select id="roundTo">
+          <option value="0">Don't round</option>
+          <option value="100">Nearest 100</option>
+          <option value="500">Nearest 500</option>
+          <option value="1000">Nearest 1.000</option>
+        </select>
+      </div>
+      <div>
+        <label for="sep">Thousands separator</label>
+        <select id="sep">
+          <option value=".">1.000 — dot</option>
+          <option value=",">1,000 — comma</option>
+        </select>
+      </div>
     </div>
   </section>
 
@@ -241,7 +251,7 @@
         crossorigin="anonymous" referrerpolicy="no-referrer" defer></script>
 
 <script type="module">
-import { calcShares, money, waLink } from './split.js';
+import { calcShares, digits, group, money, setMoneySeparator, waLink } from './split.js';
 
 const KEY = 'split-bill';
 const $ = (id) => document.getElementById(id);
@@ -271,12 +281,39 @@ catch { bill = blank(); }
 // Stored JSON is untrusted — an item without a sharedBy array, or a duplicate
 // name, would break the split. Normalise once instead of guarding everywhere.
 bill.participants = [...new Set((Array.isArray(bill.participants) ? bill.participants : []).map(String))];
+// Money fields hold whole-rupiah digit strings. A stored decimal has to be rounded
+// on the way in, or reading it as digits would turn 1142.51 into 114.251.
+const rupiah = (v) => (v === '' || v == null ? '' : String(Math.max(0, Math.round(Number(v) || 0))));
 bill.items = (Array.isArray(bill.items) ? bill.items : []).map((it) => ({
-  name: '', amount: '', ...it, sharedBy: Array.isArray(it.sharedBy) ? it.sharedBy.map(String) : [],
+  name: '', ...it, amount: rupiah(it.amount),
+  sharedBy: Array.isArray(it.sharedBy) ? it.sharedBy.map(String) : [],
 }));
+for (const k of ['serviceAmt', 'taxAmt', 'discount']) bill[k] = rupiah(bill[k]);
 if (!bill.phones || typeof bill.phones !== 'object') bill.phones = {};
 
 const save = () => localStorage.setItem(KEY, JSON.stringify(bill));
+
+// --- money fields -----------------------------------------------------------
+// Amounts are stored as plain digit strings; the separator is display only, so
+// the maths never has to parse a formatted number back. It's a device
+// preference like the theme, not part of the bill.
+const SEP_KEY = 'split-bill-sep';
+let sep = localStorage.getItem(SEP_KEY) === ',' ? ',' : '.';
+setMoneySeparator(sep);
+
+// Regroup on every keystroke without dragging the caret to the end: count the
+// digits to its left, reformat, then land after that same digit again.
+function onMoneyInput(inp, set) {
+  inp.oninput = () => {
+    const typed = inp.value.slice(0, inp.selectionStart ?? inp.value.length).replace(/\D/g, '').length;
+    const raw = digits(inp.value);
+    inp.value = group(raw);
+    let seen = 0, at = 0;
+    while (at < inp.value.length && seen < typed) if (/\d/.test(inp.value[at++])) seen++;
+    inp.setSelectionRange(at, at);
+    set(raw);
+  };
+}
 
 // --- theme ------------------------------------------------------------------
 // Auto follows the OS; light/dark pin it. Only color-scheme changes — every
@@ -320,10 +357,22 @@ const swipeOut = (node) => (still.matches || !node?.animate
 const markNew = (boxId, sel) => $(boxId).querySelector(`${sel}:last-of-type`)?.classList.add('enter');
 
 // --- header + charges -------------------------------------------------------
+const MONEY = new Set(['svcAmt', 'taxAmt', 'disc']);
+const paintFields = () => { for (const [id, key] of FIELDS) $(id).value = MONEY.has(id) ? group(bill[key]) : bill[key]; };
+paintFields();
 for (const [id, key] of FIELDS) {
-  $(id).value = bill[key];
-  $(id).oninput = () => { bill[key] = $(id).value; save(); renderSummary(); };
+  if (MONEY.has(id)) onMoneyInput($(id), (raw) => { bill[key] = raw; save(); renderSummary(); });
+  else $(id).oninput = () => { bill[key] = $(id).value; save(); renderSummary(); };
 }
+
+$('sep').value = sep;
+$('sep').onchange = () => {
+  sep = $('sep').value === ',' ? ',' : '.';
+  localStorage.setItem(SEP_KEY, sep);
+  setMoneySeparator(sep);
+  paintFields(); // charge fields keep their raw values, just regrouped
+  renderAll();
+};
 $('tos').checked = bill.taxOnService !== false;
 $('tos').onchange = () => { bill.taxOnService = $('tos').checked; save(); renderSummary(); };
 
@@ -382,10 +431,10 @@ function renderItems() {
     const name = el('input', { type: 'text', value: item.name, placeholder: 'Item', maxLength: 60, ariaLabel: 'Item name' });
     name.oninput = () => { item.name = name.value; save(); renderSummary(); };
     const amount = el('input', {
-      type: 'number', value: item.amount, placeholder: '0', min: '0', step: '1',
-      inputMode: 'decimal', ariaLabel: 'Amount',
+      className: 'money', type: 'text', value: group(item.amount), placeholder: '0',
+      inputMode: 'numeric', maxLength: 15, ariaLabel: 'Amount',
     });
-    amount.oninput = () => { item.amount = amount.value; save(); renderSummary(); };
+    onMoneyInput(amount, (raw) => { item.amount = raw; save(); renderSummary(); });
     const del = el('button', {
       className: 'icon', title: 'Remove item', textContent: '✕',
       onclick: async () => {
@@ -566,7 +615,7 @@ $('reset').onclick = () => {
   if (!confirm('Clear this bill and start over?')) return;
   bill = blank();
   save();
-  for (const [id, key] of FIELDS) $(id).value = bill[key];
+  paintFields();
   $('tos').checked = true;
   renderAll();
 };

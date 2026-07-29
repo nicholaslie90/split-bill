@@ -104,7 +104,20 @@ export function calcShares(bill) {
   };
 }
 
-export const money = (n) => new Intl.NumberFormat('id-ID').format(Math.round(n));
+// Thousands separator is a preference: dots (Indonesian) or commas.
+let sep = '.';
+let locale = 'id-ID';
+export const setMoneySeparator = (s) => {
+  sep = s === ',' ? ',' : '.';
+  locale = sep === ',' ? 'en-US' : 'id-ID';
+};
+export const money = (n) => new Intl.NumberFormat(locale).format(Math.round(n));
+
+// What's typed into a money field -> the whole rupiah behind it, and back out
+// grouped for display. Digits only: no cents in IDR, and a decimal point would
+// be ambiguous the moment the separator is a dot.
+export const digits = (s) => String(s ?? '').replace(/\D/g, '').replace(/^0+(?=\d)/, '');
+export const group = (s) => digits(s).replace(/\B(?=(\d{3})+(?!\d))/g, sep);
 
 // Optional phone -> the digits wa.me wants, or null (null = let WhatsApp show its contact picker).
 // ponytail: assumes Indonesia when there's no country code; type +<code> for anywhere else.
