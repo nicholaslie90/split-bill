@@ -107,6 +107,7 @@
                 color var(--tap) var(--ease), box-shadow var(--tap) var(--ease);
   }
   button:active { transform: scale(.96); }
+  button:disabled { opacity: .55; cursor: default; transform: none; }
   button.primary {
     background: var(--accent); color: var(--accent-ink); border-color: transparent;
     font-weight: 600; box-shadow: var(--shadow);
@@ -204,7 +205,14 @@
   <section>
     <h2>Items</h2>
     <div id="items"></div>
-    <button id="addItem" style="margin-top:10px">+ Add item</button>
+    <div class="row" style="margin-top:10px">
+      <button id="addItem">+ Add item</button>
+      <button id="scan">📷 Scan a receipt</button>
+    </div>
+    <!-- No capture attribute: that would force the camera open. Without it the
+         phone offers both — take a photo now, or use one from the library. -->
+    <input id="shot" type="file" accept="image/*" hidden>
+    <p class="hint" id="scanNote" style="margin-top:8px" aria-live="polite">Scanning is best effort — a struk photo is read roughly, so check every name and amount afterwards. Service, tax and discount you still enter yourself. The photo never leaves your browser.</p>
   </section>
 
   <section>
@@ -264,6 +272,7 @@
 <nav class="dock">
   <div>
     <button id="pdf" class="primary">📄 PDF</button>
+    <button id="csv">📊 Excel</button>
     <button id="reset">Start over</button>
   </div>
 </nav>
@@ -273,7 +282,7 @@
         crossorigin="anonymous" referrerpolicy="no-referrer" defer></script>
 
 <script type="module">
-import { calcShares, collect, digits, fmtDate, group, money, setMoneySeparator, waLink } from './split.js';
+import { calcShares, collect, digits, fmtDate, group, money, parseReceipt, setMoneySeparator, toCsv, waLink } from './split.js';
 
 const KEY = 'split-bill';
 const $ = (id) => document.getElementById(id);
@@ -519,6 +528,62 @@ $('addItem').onclick = () => {
   $('items').querySelector('.item:last-of-type input')?.focus();
 };
 
+// --- scanning a receipt -----------------------------------------------------
+// Tesseract runs entirely in the page — the photo is never uploaded anywhere.
+// The library is ~60 KB but pulls its wasm engine and the Indonesian language
+// data (~4 MB) on first use, so none of it loads until you actually scan, and
+// the browser caches it for next time.
+const OCR_SRC = 'https://cdn.jsdelivr.net/npm/tesseract.js@6.0.1/dist/tesseract.min.js';
+const OCR_SRI = 'sha384-r1ru3tcf6FhnCFR4B7pIFG+BhFF9LlFtz/P1y4pblWn3AGs9y3lBx5SKLNf4+rED';
+let ocr; // the pending or resolved Tesseract namespace
+const loadOcr = () => (ocr ??= new Promise((ok, fail) => {
+  document.head.append(el('script', {
+    src: OCR_SRC, integrity: OCR_SRI, crossOrigin: 'anonymous', referrerPolicy: 'no-referrer',
+    onload: () => ok(window.Tesseract),
+    // Drop the failed attempt so pressing scan again retries instead of hanging.
+    onerror: () => { ocr = null; fail(new Error('Could not load the scanner — check your connection.')); },
+  }));
+}));
+
+const note = (text) => { $('scanNote').textContent = text; };
+const KEEP = $('scanNote').textContent; // the standing best-effort caveat
+
+$('scan').onclick = () => $('shot').click();
+$('shot').onchange = async () => {
+  const file = $('shot').files?.[0];
+  $('shot').value = ''; // so picking the same photo twice still fires
+  if (!file) return;
+  $('scan').disabled = true;
+  note('Loading the scanner — a one-time download of about 4 MB…');
+  try {
+    const T = await loadOcr();
+    // ponytail: the photo goes to Tesseract at whatever size the camera made it.
+    // Recognition runs in a worker so the page stays responsive; if a 12 MP photo
+    // proves too slow on older phones, downscale to ~1500px wide on a canvas first.
+    const { data } = await T.recognize(file, 'ind', {
+      logger: (m) => { if (m.status === 'recognizing text') note(`Reading the receipt… ${Math.round(m.progress * 100)}%`); },
+    });
+    const { items, total } = parseReceipt(data.text);
+    if (!items.length) {
+      note(`Couldn't make out any item lines — add them by hand. ${KEEP}`);
+      return;
+    }
+    // Append, never replace: a bad scan must not wipe out what's already typed.
+    bill.items.push(...items.map((it) => ({ name: it.name, amount: String(it.amount), sharedBy: [] })));
+    save(); renderAll();
+    const read = items.reduce((a, it) => a + it.amount, 0);
+    note([
+      `Added ${items.length} item${items.length > 1 ? 's' : ''}, Rp ${money(read)} in total.`,
+      total ? `The struk says its total is Rp ${money(total)} — service, tax and discount make up the difference.` : '',
+      KEEP,
+    ].filter(Boolean).join(' '));
+  } catch (e) {
+    note(`${e.message} ${KEEP}`);
+  } finally {
+    $('scan').disabled = false;
+  }
+};
+
 // --- summary + sharing ------------------------------------------------------
 let result = { people: [], subtotal: 0, service: 0, tax: 0, total: 0 };
 
@@ -663,23 +728,43 @@ function buildPdf() {
   return doc;
 }
 
+// --- saving a copy ----------------------------------------------------------
+// One name for both formats, so a folder of them sorts by bill and date.
+const fileName = (ext) =>
+  `${(bill.title?.trim() || 'split-bill').replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-${bill.date || ''}.${ext}`;
+
+// Mobile: the share sheet hands the file straight to WhatsApp or Files.
+// Desktop (and any phone that refuses): a plain download.
+async function deliver(file) {
+  if (navigator.canShare?.({ files: [file] })) {
+    try { return await navigator.share({ files: [file], title: label() }); }
+    catch (e) { if (e.name === 'AbortError') return; } // user closed the sheet
+  }
+  const url = URL.createObjectURL(file);
+  const a = el('a', { href: url, download: file.name });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  // Let the download start before the blob goes away.
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+}
+
 $('pdf').onclick = async () => {
   if (!result.people.length) return alert('Add participants and items first.');
   try {
-    const doc = buildPdf();
-    const name = `${(bill.title?.trim() || 'split-bill').replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-${bill.date || ''}.pdf`;
-    const file = new File([doc.output('blob')], name, { type: 'application/pdf' });
-    // Mobile: the share sheet hands the PDF straight to WhatsApp. Desktop: download it.
-    if (navigator.canShare?.({ files: [file] })) {
-      try {
-        await navigator.share({ files: [file], title: label() });
-      } catch (e) {
-        if (e.name === 'AbortError') return; // user closed the share sheet
-        doc.save(name); // share exists but refused it — still give them the file
-      }
-    } else {
-      doc.save(name);
-    }
+    await deliver(new File([buildPdf().output('blob')], fileName('pdf'), { type: 'application/pdf' }));
+  } catch (e) {
+    alert(e.message);
+  }
+};
+
+// The same bill as a spreadsheet, for your own offline history. CSV opens in
+// Excel and Sheets and stays readable in a plain text editor; the BOM is what
+// keeps names with accents intact when Excel opens it.
+$('csv').onclick = async () => {
+  if (!result.people.length) return alert('Add participants and items first.');
+  try {
+    await deliver(new File(['\ufeff' + toCsv(bill, result)], fileName('csv'), { type: 'text/csv;charset=utf-8' }));
   } catch (e) {
     alert(e.message);
   }

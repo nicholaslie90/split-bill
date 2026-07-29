@@ -1,6 +1,6 @@
 // node test.mjs  — fails loudly if the money math breaks.
 import assert from 'node:assert/strict';
-import { calcShares, collect, digits, fmtDate, group, money, roundToSum, setMoneySeparator, waLink, waNumber } from './split.js';
+import { calcShares, collect, digits, fmtDate, group, money, parseReceipt, roundToSum, setMoneySeparator, toCsv, waLink, waNumber } from './split.js';
 
 // 1. The example from the brief: equal split per item, nobody pays for what they didn't eat.
 {
@@ -279,6 +279,103 @@ assert.deepEqual(roundToSum([1142.5, 1142.5], 2285), [1143, 1142]);
   assert.equal(collect(voucher, 'A').due + 50, voucher.total);
   const nil = calcShares({ participants: ['A', 'B'], items: [{ name: 'x', amount: 100, sharedBy: ['A'] }] });
   assert.deepEqual(collect(nil, 'A').owed, []); // B ordered nothing, so B is not on the list
+}
+
+// 4f. Reading a struk photo. Best effort, but two things must always hold: a
+// charge line is never mistaken for an item (that would double-charge it), and
+// a number that isn't money is never taken as an amount.
+{
+  // What OCR actually hands back for an Indonesian receipt: ragged spacing,
+  // a qty column, unit price and line total, then the charges.
+  const { items, total } = parseReceipt(`
+    KOPO THAI
+    Jl. Kopo Sayati No. 12
+    Tanggal 29/07/2026  18:04
+    Kasir: Dewi     Meja 7
+    ------------------------------
+    1 Supreme beef krapao   130.000
+    2 x Es Teh    5.000      10.000
+    Chicken wings            49.000
+    Rice                      7.000
+    Ko yum noodle            59.000
+    ------------------------------
+    Subtotal                255.000
+    Service charge 5%        12.750
+    PPN 11%                  29.453
+    Diskon                   40.500
+    TOTAL                   256.703
+    TUNAI                   300.000
+    Kembali                  43.297
+    Terima kasih!
+  `);
+  assert.deepEqual(items, [
+    { name: 'Supreme beef krapao', amount: 130000 }, // lone qty "1" dropped
+    { name: '2x Es Teh', amount: 10000 },            // qty kept, line total not unit price
+    { name: 'Chicken wings', amount: 49000 },
+    { name: 'Rice', amount: 7000 },
+    { name: 'Ko yum noodle', amount: 59000 },
+  ]);
+  assert.equal(total, 256703); // the printed total, for cross-checking — never an item
+  assert.equal(items.reduce((a, i) => a + i.amount, 0), 255000); // matches the printed subtotal
+
+  // Charges, payment and header junk must never arrive as items.
+  for (const line of ['Subtotal 255.000', 'Service Charge 12.750', 'PPN 11% 29.453', 'Pajak 1.000',
+                      'Diskon 40.500', 'Pembulatan 500', 'TOTAL 256.703', 'Tunai 300.000',
+                      'Kembali 43.297', 'Kartu Debit 256.703', 'QRIS 256.703',
+                      'Tanggal 29/07/2026', 'Meja 7', 'NPWP 12.345.678.9', 'www.kopothai.co.id']) {
+    assert.deepEqual(parseReceipt(line).items, [], `must not read "${line}" as an item`);
+  }
+  // Amount shapes, and numbers that aren't money.
+  assert.deepEqual(parseReceipt('Nasi Goreng 59000').items, [{ name: 'Nasi Goreng', amount: 59000 }]);
+  assert.deepEqual(parseReceipt('Nasi Goreng 59.000,00').items, [{ name: 'Nasi Goreng', amount: 59000 }]);
+  assert.deepEqual(parseReceipt('Nasi Goreng 59,000').items, [{ name: 'Nasi Goreng', amount: 59000 }]);
+  assert.deepEqual(parseReceipt('Nasi Goreng 1.234.567').items, [{ name: 'Nasi Goreng', amount: 1234567 }]);
+  assert.deepEqual(parseReceipt('Kerupuk 590').items, [{ name: 'Kerupuk', amount: 590 }]);
+  // a size in the name is part of the name; only a trailing price column is dropped
+  assert.deepEqual(parseReceipt('Sprite 500ml 12.000').items, [{ name: 'Sprite 500ml', amount: 12000 }]);
+  assert.deepEqual(parseReceipt('Es Teh 50').items, []);  // too small to be a price
+  assert.deepEqual(parseReceipt('2 x 5.000').items, []);  // no name, so not an item
+  assert.deepEqual(parseReceipt('18:04').items, []);
+  assert.deepEqual(parseReceipt('').items, []);
+  assert.deepEqual(parseReceipt(null).items, []);
+  assert.equal(parseReceipt('Nasi Goreng 59.000').total, null); // no printed total to check against
+}
+
+// 4g. The spreadsheet export: whole rupiah as bare numbers so the sheet adds up,
+// and nothing a user typed can come back as a formula.
+{
+  const bill = {
+    title: 'Kopo Thai', date: '2026-07-29',
+    participants: ['Fav', 'Dwita'], phones: { Fav: '08123456789' }, paidBy: 'Fav',
+    items: [{ name: 'krapao', amount: '130000', sharedBy: ['Dwita'] }, { name: 'tea', amount: '10000', sharedBy: [] }],
+    payBank: 'BCA', payAcct: '1234567890', payName: 'Fav Santoso',
+  };
+  const r = calcShares(bill);
+  const csv = toCsv(bill, r);
+  const rows = csv.split('\r\n');
+  assert.equal(rows[0], 'sep=,'); // unquoted, or Excel won't honour it
+  assert.equal(rows[1], 'Bill,Kopo Thai');
+  assert.ok(rows.includes('krapao,130000,Dwita'));
+  assert.ok(rows.includes('tea,10000,everyone'));
+  assert.ok(rows.includes(`Total,${r.total}`));
+  assert.ok(rows.includes(`Fav,08123456789,yes,${r.people[0].subtotal},0,0,0,0,${r.people[0].total}`));
+  assert.ok(rows.includes('Paid up front by,Fav'));
+  assert.ok(rows.includes(`Owed back,${collect(r, 'Fav').due}`));
+  assert.ok(rows.includes('Transfer to,BCA,1234567890,Fav Santoso'));
+  // the per-person Total column must add up to the bill's own Total row
+  const cols = rows.filter((l) => /^(Fav|Dwita),/.test(l)).map((l) => Number(l.split(',').at(-1)));
+  assert.equal(cols.reduce((a, b) => a + b, 0), r.total);
+
+  // A name that would otherwise be run as a formula, and one with a comma/quote.
+  const nasty = { ...bill, participants: ['=1+1', 'A,B "the" C'], phones: {}, paidBy: '',
+                  items: [{ name: '@SUM(A1)', amount: '5000', sharedBy: [] }] };
+  const out = toCsv(nasty, calcShares(nasty));
+  assert.ok(out.includes("'=1+1"), 'a leading = is defused');
+  assert.ok(out.includes("'@SUM(A1)"), 'a leading @ is defused');
+  assert.ok(out.includes('"A,B ""the"" C"'), 'commas and quotes are escaped');
+  assert.ok(!out.split('\r\n').some((l) => /^=|,=/.test(l)), 'no cell starts a formula');
+  // an empty bill still produces a readable file rather than throwing
+  assert.ok(toCsv({}, calcShares({})).startsWith('sep=,\r\nBill,Split Bill'));
 }
 
 // 5. Optional phone number -> wa.me digits. Blank/garbage must fall back to the contact picker.

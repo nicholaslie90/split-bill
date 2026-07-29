@@ -113,6 +113,104 @@ export function collect(result, payer) {
   return { owed, due: owed.reduce((a, p) => a + p.total, 0) };
 }
 
+// --- receipt photo -> draft item lines --------------------------------------
+// Best effort, and that is the whole contract: a struk photo is creased, faded
+// and thermal-printed, so this is deliberately conservative. It takes the
+// rightmost money-looking number on a line as that line's amount and the text
+// before it as the name, and it skips the lines that aren't items — totals, tax,
+// service, cash, change — which the app charges through its own fields, so a
+// misread there can't quietly double-charge anybody. Whatever it gets wrong the
+// user edits; whatever it misses they type.
+const NOT_AN_ITEM = /(sub\s*)?total|tunai|cash|kembali|change|ppn|pb\s*1|pajak|tax|servi|diskon|discount|voucher|pembulatan|rounding|bayar|payment|kartu|card|debit|kredit|credit|qris|npwp|terima\s*kasih|thank|kasir|cashier|struk|invoice|meja|table|tanggal|date|jam|time|www\.|@/i;
+// 59.000 | 59,000 | 1.234.567 | 59000 — with an optional two-decimal tail.
+const MONEY = String.raw`\d{1,3}(?:[.,]\d{3})+(?:[.,]\d{2})?|\d{3,}(?:[.,]\d{2})?`;
+const MONEY_ON_LINE = new RegExp(MONEY, 'g');
+// A price sitting at the end of what's left of the name is the unit-price column
+// ("2 x Es Teh  5.000  10.000"), not part of what the thing is called.
+const UNIT_PRICE = new RegExp(`(?:${MONEY})\\s*$`);
+
+// "59.000,00" -> 59000. The two-decimal tail only goes if what's left still
+// looks like an amount, so a bare "590" stays 590 rather than becoming 5.
+const asRupiah = (s) => {
+  const trimmed = s.replace(/[.,]\d{2}$/, '');
+  return Number((trimmed.replace(/\D/g, '').length >= 3 ? trimmed : s).replace(/\D/g, ''));
+};
+
+export function parseReceipt(text) {
+  const items = [];
+  let total = null;
+  for (const raw of String(text ?? '').split('\n')) {
+    const line = raw.trim();
+    const found = line.match(MONEY_ON_LINE);
+    if (!found) continue;
+    const amount = asRupiah(found[found.length - 1]); // unit price then line total: the line total wins
+    if (amount < 100) continue; // qty, table number, a year — not money
+    if (NOT_AN_ITEM.test(line)) {
+      // The printed total is worth keeping as a cross-check, even though it's
+      // not an item. Receipts print SUBTOTAL, then TOTAL, then what was paid.
+      if (/\btotals?\b/i.test(line) && !/sub\s*total/i.test(line)) total = amount;
+      continue;
+    }
+    // Quantity leads the line more often than not. Keep it when it's more than
+    // one — "2x Es Teh" explains the amount — and drop a lone "1".
+    const name = line.slice(0, line.lastIndexOf(found[found.length - 1]))
+      .replace(UNIT_PRICE, '')
+      .replace(/^(\d+)\s*[xX*]?\s+/, (_, q) => (Number(q) > 1 ? `${q}x ` : ''))
+      .replace(/^[\s.,:;*|-]+/, '')
+      .replace(/[\s.,:;xX*@=|-]+$/, '')
+      .trim();
+    if ((name.match(/[a-z]/gi) ?? []).length < 2) continue; // no name = not an item line
+    items.push({ name, amount });
+  }
+  return { items, total };
+}
+
+// --- the bill as a spreadsheet ----------------------------------------------
+// For keeping your own history offline. CSV because every spreadsheet opens it
+// and it stays a plain text file you can read in ten years; the `sep=,` first
+// line is what makes Excel respect the comma whatever the machine's locale says.
+// Amounts are written as bare numbers, so the columns actually add up in the sheet.
+const cell = (v) => {
+  if (typeof v === 'number') return String(v);
+  const s = String(v ?? '');
+  // A leading =, +, - or @ makes a spreadsheet run typed text as a formula. Defuse it.
+  const safe = /^[=+\-@\t\r]/.test(s) ? `'${s}` : s;
+  return /[",\r\n]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
+};
+
+export function toCsv(bill, result) {
+  const paidBy = bill.paidBy || '';
+  const rows = [
+    ['Bill', bill.title?.trim() || 'Split Bill'],
+    ['Date', bill.date || ''],
+    [],
+    ['Item', 'Amount', 'Shared by'],
+    ...(bill.items ?? []).map((it) => [
+      it.name || 'Item', Number(it.amount) || 0,
+      it.sharedBy?.length ? it.sharedBy.join(', ') : 'everyone',
+    ]),
+    [],
+    ['Subtotal', result.subtotal],
+    ['Service charge', result.service],
+    ['Tax', result.tax],
+    ['Discount', -result.discount],
+    ['Rounding', -result.rounding],
+    ['Total', result.total],
+    [],
+    ['Person', 'Phone', 'Paid up front', 'Subtotal', 'Service', 'Tax', 'Discount', 'Rounding', 'Total'],
+    ...result.people.map((p) => [
+      p.name, bill.phones?.[p.name] ?? '', p.name === paidBy ? 'yes' : '',
+      p.subtotal, p.service, p.tax, -p.discount, -p.rounding, p.total,
+    ]),
+    ['All', '', '', result.subtotal, result.service, result.tax, -result.discount, -result.rounding, result.total],
+  ];
+  if (paidBy) rows.push([], ['Paid up front by', paidBy], ['Owed back', collect(result, paidBy).due]);
+  const pay = [bill.payBank, bill.payAcct, bill.payName].map((s) => (s ?? '').trim()).filter(Boolean);
+  if (pay.length) rows.push([], ['Transfer to', ...pay]);
+  // `sep=,` has to reach the file unquoted, so it goes in outside the escaping.
+  return ['sep=,', ...rows.map((r) => r.map(cell).join(','))].join('\r\n');
+}
+
 // Thousands separator is a preference: dots (Indonesian) or commas.
 let sep = '.';
 let locale = 'id-ID';
