@@ -1,36 +1,30 @@
 // Bill math. Everything is whole rupiah — no cents in IDR.
 // The only rule that matters: the sum of what everybody pays must equal the bill total, exactly.
 
-// Hand `total` out across `weights` as integers that sum to exactly `total`.
-// Largest-remainder (Hare quota): floor everything, then give the leftover
-// units to whoever got robbed hardest by the floor. Ordering by remainder is
-// what makes this round half-up: a .51 share is always served before a .49 one,
-// so every value is its half-up rounding except where the total makes that
-// impossible (two shares of exactly .5 can't both round up and still sum right).
-export function allocate(total, weights) {
-  const n = weights.length;
-  if (!n) return [];
-  let w = weights;
-  if (w.reduce((a, b) => a + b, 0) <= 0) w = w.map(() => 1); // no items yet: split flat charges evenly
-  const denom = w.reduce((a, b) => a + b, 0);
-  const exact = w.map((x) => (total * x) / denom);
-  const out = exact.map(Math.floor);
-  let left = total - out.reduce((a, b) => a + b, 0);
-  const step = left >= 0 ? 1 : -1; // step handles negative totals (discounts)
-  const order = exact
-    .map((v, i) => [v - Math.floor(v), i])
-    .sort((a, b) => (step * (b[0] - a[0])) || a[1] - b[1])
+// Round `values` to whole rupiah so that they still add up to `target`.
+// Half-up first — .5 and above goes up, below stays put — which is the number
+// anyone checking the maths on their own would write down. That can miss the
+// target by a rupiah or two, so the residual goes to whoever the rounding
+// treated worst; ties go to whoever is listed first.
+export function roundToSum(values, target) {
+  const out = values.map((v) => Math.round(v));
+  let left = target - out.reduce((a, b) => a + b, 0);
+  if (!values.length) return out; // nothing to put the residual on
+  const step = left >= 0 ? 1 : -1; // step handles negative targets (a net refund)
+  const order = values
+    .map((v, i) => [(v - out[i]) * step, i]) // how much this value lost to rounding
+    .sort((a, b) => (b[0] - a[0]) || step * (a[1] - b[1]))
     .map((e) => e[1]);
-  for (let k = 0; left !== 0; k++, left -= step) out[order[k % n]] += step;
+  for (let k = 0; left !== 0; k++, left -= step) out[order[k % order.length]] += step;
   return out;
 }
 
 // bill: { participants: [name], items: [{name, amount, sharedBy: [name]}],
-//         servicePct, serviceAmt, taxPct, taxAmt, taxOnService, discount, discountPct }
+//         servicePct, serviceAmt, taxPct, taxAmt, taxOnService, discount, discountPct, roundTo }
 // Service, tax and discount each take a percentage, a flat rupiah amount, or both.
 export function calcShares(bill) {
   const people = bill.participants ?? [];
-  const empty = { people: [], subtotal: 0, service: 0, tax: 0, discount: 0, total: 0 };
+  const empty = { people: [], subtotal: 0, service: 0, tax: 0, discount: 0, rounding: 0, total: 0 };
   if (!people.length) return empty;
 
   // Exact (fractional) item slices per person. These double as the weights
@@ -56,37 +50,57 @@ export function calcShares(bill) {
   // ID convention: PPN is charged on subtotal + service charge (flat part included). Toggleable.
   const tax = ((gross + (bill.taxOnService === false ? 0 : service)) * taxPct) / 100 + (Number(bill.taxAmt) || 0);
 
-  const subs = allocate(Math.round(gross), weights);
-  const svcs = allocate(Math.round(service), weights);
-  const taxes = allocate(Math.round(tax), weights);
-  const charged = subs.reduce((a, b) => a + b, 0) + svcs.reduce((a, b) => a + b, 0) + taxes.reduce((a, b) => a + b, 0);
+  const subtotal = Math.round(gross);
+  const svcTotal = Math.round(service);
+  const taxTotal = Math.round(tax);
+  const charged = subtotal + svcTotal + taxTotal;
   // Flat per head, not proportional — a Rp 50k voucher is worth the same to everyone.
   // Rupiah and percent stack (10% off *and* a voucher), then cap at the bill so
   // the total can never go negative.
   const off = (Number(bill.discount) || 0) + (charged * (Number(bill.discountPct) || 0)) / 100;
   const discount = Math.min(Math.max(0, Math.round(off)), charged);
-  const discs = allocate(discount, people.map(() => 1));
 
-  // Each person's item lines are handed out of that person's own subtotal, so the
-  // lines they read always add up to the number they're asked to pay. Rounding
-  // each line on its own drifts by a rupiah either way.
-  const lineAmts = people.map((_, i) => allocate(subs[i], lines[i].map((l) => l.share)));
+  // Pembulatan: shave the total down to a round figure — the tail nobody wants to
+  // hand over in coins. Zero when the total already lands on one, so the line only
+  // shows up when it's actually doing something.
+  const step = Math.max(0, Math.round(Number(bill.roundTo) || 0));
+  const rounding = step > 1 ? (charged - discount) % step : 0;
+
+  // Each person's exact, unrounded cut: their slice of the items carries the same
+  // slice of service and tax, less an even share of the discount.
+  // No items yet -> nobody has a slice, so flat charges split evenly.
+  const cut = gross > 0 ? weights.map((w) => w / gross) : weights.map(() => 1 / people.length);
+  const parts = cut.map((f) => [
+    f * subtotal, f * svcTotal, f * taxTotal,
+    -discount / people.length, -rounding / people.length,
+  ]);
+
+  // Round the number people actually read — their total — and only then split it
+  // back into the lines that explain it. Rounding each column on its own instead
+  // lets one person collect the leftover rupiah of the subtotal AND the service
+  // AND the tax, which pushed their total up a rupiah while somebody else's fell
+  // a rupiah short of the half-up they'd work out by hand.
+  const totals = roundToSum(parts.map((r) => r.reduce((a, b) => a + b, 0)), charged - discount - rounding);
+  const rows = parts.map((r, i) => roundToSum(r, totals[i]));
+  const lineAmts = people.map((_, i) => roundToSum(lines[i].map((l) => l.share), rows[i][0]));
 
   return {
     people: people.map((name, i) => ({
       name,
       lines: lines[i].map((l, k) => ({ ...l, share: lineAmts[i][k] })),
-      subtotal: subs[i],
-      service: svcs[i],
-      tax: taxes[i],
-      discount: discs[i],
-      total: subs[i] + svcs[i] + taxes[i] - discs[i],
+      subtotal: rows[i][0],
+      service: rows[i][1],
+      tax: rows[i][2],
+      discount: -rows[i][3],
+      rounding: -rows[i][4],
+      total: totals[i],
     })),
-    subtotal: Math.round(gross),
-    service: Math.round(service),
-    tax: Math.round(tax),
+    subtotal,
+    service: svcTotal,
+    tax: taxTotal,
     discount,
-    total: charged - discount,
+    rounding,
+    total: charged - discount - rounding,
   };
 }
 

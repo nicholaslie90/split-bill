@@ -1,6 +1,6 @@
 // node test.mjs  — fails loudly if the money math breaks.
 import assert from 'node:assert/strict';
-import { allocate, calcShares, waLink, waNumber } from './split.js';
+import { calcShares, roundToSum, waLink, waNumber } from './split.js';
 
 // 1. The example from the brief: equal split per item, nobody pays for what they didn't eat.
 {
@@ -107,6 +107,40 @@ import { allocate, calcShares, waLink, waNumber } from './split.js';
   assert.equal(calcShares({ ...base, serviceAmt: 'x', taxAmt: null }).total, 200000);
 }
 
+// 2d. Rounding the total down to a round figure ("pembulatan").
+{
+  const base = {
+    participants: ['Fav', 'Dwita', 'Titin', 'Fenny'],
+    items: [
+      { name: 'krapao', amount: 130000, sharedBy: ['Dwita', 'Titin'] },
+      { name: 'wings', amount: 49000, sharedBy: ['Fenny'] },
+      { name: 'tea', amount: 25000, sharedBy: ['Titin'] },
+      { name: 'rice', amount: 7000, sharedBy: ['Fenny'] },
+      { name: 'noodle', amount: 59000, sharedBy: ['Fav'] },
+    ],
+    serviceAmt: 5260, taxAmt: 26300, discount: 40500, // total 261.060
+  };
+  const r100 = calcShares({ ...base, roundTo: 100 });
+  assert.equal(r100.rounding, 60);
+  assert.equal(r100.total, 261000);
+  assert.equal(r100.people.reduce((a, p) => a + p.total, 0), 261000);
+  assert.equal(r100.people.reduce((a, p) => a + p.rounding, 0), 60);
+  for (const p of r100.people) {
+    assert.equal(p.subtotal + p.service + p.tax - p.discount - p.rounding, p.total);
+  }
+  assert.equal(calcShares({ ...base, roundTo: 500 }).total, 261000);
+  assert.equal(calcShares({ ...base, roundTo: 1000 }).total, 261000);
+  // already round -> nothing to shave, so no rounding line at all
+  const exact = calcShares({ ...base, discount: 40560, roundTo: 100 });
+  assert.equal(exact.total, 261000);
+  assert.equal(exact.rounding, 0);
+  // off / garbage
+  assert.equal(calcShares({ ...base }).rounding, 0);
+  assert.equal(calcShares({ ...base, roundTo: 0 }).total, 261060);
+  assert.equal(calcShares({ ...base, roundTo: 'x' }).total, 261060);
+  assert.equal(calcShares({ ...base, roundTo: -100 }).total, 261060);
+}
+
 // 3. Reconciliation under nasty rounding: shares must always sum to the total.
 for (const n of [3, 6, 7, 11]) {
   for (const amount of [10000, 33333, 1, 99999]) {
@@ -140,16 +174,41 @@ assert.equal(calcShares({ participants: ['A'], items: [] }).total, 0);
   assert.equal(g.total, 0);
 }
 {
-  // negative total (discount) still reconciles
-  const a = allocate(-1000, [1, 1, 1]);
+  // negative target (a net refund) still reconciles
+  const a = roundToSum([-333.34, -333.33, -333.33], -1000);
   assert.equal(a.reduce((x, y) => x + y, 0), -1000);
 }
-assert.deepEqual(allocate(10, [1, 1, 1]), [4, 3, 3]); // deterministic leftover order
+assert.deepEqual(roundToSum([3.333, 3.333, 3.333], 10), [4, 3, 3]); // deterministic leftover order
+assert.deepEqual(roundToSum([], 0), []);
 
-// 4b. Half-up rounding: .51 rounds up, .49 stays put.
-assert.deepEqual(allocate(3428, [1142.51, 1142.49, 1143]), [1143, 1142, 1143]);
-// A .5 tie can't round both ways and still sum to the bill — one has to give.
-assert.deepEqual(allocate(2285, [1, 1]), [1143, 1142]);
+// 4b. Half-up rounding: .51 rounds up, .49 stays put, and no residual to hand out.
+assert.deepEqual(roundToSum([1142.51, 1142.49, 1143], 3428), [1143, 1142, 1143]);
+// A .5 tie can't round both ways and still sum to the bill — one has to give,
+// and it's the one listed last.
+assert.deepEqual(roundToSum([1142.5, 1142.5], 2285), [1143, 1142]);
+
+// 4c. The bug from the field: every share must be the half-up of its exact value
+// when the total allows it, never a rupiah over on one person and under on another.
+{
+  // Kopo Thai, 4 people, service and tax as amounts, Rp 40.500 off.
+  const r = calcShares({
+    participants: ['Fav', 'Dwita', 'Titin', 'Fenny'],
+    items: [
+      { name: 'Supreme beef krapao', amount: 130000, sharedBy: ['Dwita', 'Titin'] },
+      { name: 'Chicken wings', amount: 49000, sharedBy: ['Fenny'] },
+      { name: 'Thai milk tea', amount: 25000, sharedBy: ['Titin'] },
+      { name: 'Rice', amount: 7000, sharedBy: ['Fenny'] },
+      { name: 'Ko yum noodle', amount: 59000, sharedBy: ['Fav'] },
+    ],
+    serviceAmt: 5260, taxAmt: 26300, discount: 40500,
+  });
+  // exact: 55771.44 / 62472.78 / 90395.00 / 52420.78
+  assert.deepEqual(r.people.map((p) => p.total), [55771, 62473, 90395, 52421]);
+  assert.equal(r.total, 261060);
+  for (const p of r.people) {
+    assert.equal(p.subtotal + p.service + p.tax - p.discount, p.total, `${p.name} parts must explain the total`);
+  }
+}
 {
   // Item lines must add up to the subtotal they explain, for everyone, always.
   for (const amount of [2285, 1142.51, 33333, 7, 99999]) {

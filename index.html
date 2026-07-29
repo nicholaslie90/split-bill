@@ -80,7 +80,7 @@
   h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 10px; }
   label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
   input, button, select { font: inherit; color: inherit; }
-  input[type=text], input[type=number], input[type=date], input[type=tel] {
+  input[type=text], input[type=number], input[type=date], input[type=tel], select {
     width: 100%; padding: 10px 11px; border: 1px solid var(--line); border-radius: 11px;
     background: var(--bg); min-width: 0;
     transition: border-color var(--tap) var(--ease), background-color var(--tap) var(--ease);
@@ -210,6 +210,15 @@
       <div><label for="discPct">Discount %</label><input id="discPct" type="number" min="0" max="100" step="0.1" inputmode="decimal"></div>
     </div>
     <p class="hint" style="margin-top:6px">Either one (or both) — the discount is split evenly per person.</p>
+    <div style="margin-top:10px">
+      <label for="roundTo">Round the total down to</label>
+      <select id="roundTo">
+        <option value="0">Don't round</option>
+        <option value="100">Nearest Rp 100</option>
+        <option value="500">Nearest Rp 500</option>
+        <option value="1000">Nearest Rp 1.000</option>
+      </select>
+    </div>
   </section>
 
   <section>
@@ -248,13 +257,13 @@ const blank = () => ({
   title: '', date: new Date().toISOString().slice(0, 10),
   participants: [], phones: {}, items: [],
   servicePct: 5, serviceAmt: '', taxPct: 11, taxAmt: '', taxOnService: true,
-  discount: '', discountPct: '',
+  discount: '', discountPct: '', roundTo: 0,
 });
 
 const FIELDS = [['title', 'title'], ['date', 'date'],
                 ['svc', 'servicePct'], ['svcAmt', 'serviceAmt'],
                 ['tax', 'taxPct'], ['taxAmt', 'taxAmt'],
-                ['disc', 'discount'], ['discPct', 'discountPct']];
+                ['disc', 'discount'], ['discPct', 'discountPct'], ['roundTo', 'roundTo']];
 
 let bill;
 try { bill = { ...blank(), ...JSON.parse(localStorage.getItem(KEY) || '{}') }; }
@@ -437,6 +446,7 @@ function messageFor(p) {
     p.service ? `Service: Rp ${money(p.service)}` : null,
     p.tax ? `Tax: Rp ${money(p.tax)}` : null,
     p.discount ? `Discount: −Rp ${money(p.discount)}` : null,
+    p.rounding ? `Rounding: −Rp ${money(p.rounding)}` : null,
   ].filter(Boolean);
   return [
     `*${label()}*`, '', `Hi ${p.name}, your share is *Rp ${money(p.total)}*`, '',
@@ -474,6 +484,7 @@ function renderSummary() {
   if (result.service) t.append(el('div', {}, [el('span', { textContent: chargeLabel('Service', bill.servicePct) }), el('span', { textContent: `Rp ${money(result.service)}` })]));
   if (result.tax) t.append(el('div', {}, [el('span', { textContent: chargeLabel('Tax', bill.taxPct) }), el('span', { textContent: `Rp ${money(result.tax)}` })]));
   if (result.discount) t.append(el('div', {}, [el('span', { textContent: `${chargeLabel('Discount', bill.discountPct)} (÷${result.people.length})` }), el('span', { textContent: `− Rp ${money(result.discount)}` })]));
+  if (result.rounding) t.append(el('div', {}, [el('span', { textContent: `Rounding (÷${result.people.length})` }), el('span', { textContent: `− Rp ${money(result.rounding)}` })]));
   t.append(el('div', { className: 'grand' }, [el('span', { textContent: 'Total' }), el('span', { textContent: `Rp ${money(result.total)}` })]));
   box.append(t);
 }
@@ -511,6 +522,7 @@ function buildPdf() {
   if (result.service) line(chargeLabel('Service charge', bill.servicePct), `Rp ${money(result.service)}`);
   if (result.tax) line(chargeLabel('Tax', bill.taxPct), `Rp ${money(result.tax)}`);
   if (result.discount) line(`${chargeLabel('Discount', bill.discountPct)} (split ${result.people.length})`, `- Rp ${money(result.discount)}`);
+  if (result.rounding) line(`Rounding (split ${result.people.length})`, `- Rp ${money(result.rounding)}`);
   line('TOTAL', `Rp ${money(result.total)}`, { size: 12, bold: true, gap: 28 });
 
   line('WHO PAYS WHAT', null, { size: 9, bold: true, gap: 16 });
@@ -522,6 +534,7 @@ function buildPdf() {
     if (p.service) line('Service charge', `Rp ${money(p.service)}`, { size: 9, gap: 13, indent: 12 });
     if (p.tax) line('Tax', `Rp ${money(p.tax)}`, { size: 9, gap: 13, indent: 12 });
     if (p.discount) line('Discount', `- Rp ${money(p.discount)}`, { size: 9, gap: 13, indent: 12 });
+    if (p.rounding) line('Rounding', `- Rp ${money(p.rounding)}`, { size: 9, gap: 13, indent: 12 });
     y += 6;
   }
   return doc;
