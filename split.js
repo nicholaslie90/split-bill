@@ -23,7 +23,8 @@ export function allocate(total, weights) {
 }
 
 // bill: { participants: [name], items: [{name, amount, sharedBy: [name]}],
-//         servicePct, taxPct, taxOnService, discount, discountPct }
+//         servicePct, serviceAmt, taxPct, taxAmt, taxOnService, discount, discountPct }
+// Service, tax and discount each take a percentage, a flat rupiah amount, or both.
 export function calcShares(bill) {
   const people = bill.participants ?? [];
   const empty = { people: [], subtotal: 0, service: 0, tax: 0, discount: 0, total: 0 };
@@ -48,9 +49,9 @@ export function calcShares(bill) {
   const gross = weights.reduce((a, b) => a + b, 0);
   const svcPct = Number(bill.servicePct) || 0;
   const taxPct = Number(bill.taxPct) || 0;
-  const service = (gross * svcPct) / 100;
-  // ID convention: PPN is charged on subtotal + service charge. Toggleable.
-  const tax = ((gross + (bill.taxOnService === false ? 0 : service)) * taxPct) / 100;
+  const service = (gross * svcPct) / 100 + (Number(bill.serviceAmt) || 0);
+  // ID convention: PPN is charged on subtotal + service charge (flat part included). Toggleable.
+  const tax = ((gross + (bill.taxOnService === false ? 0 : service)) * taxPct) / 100 + (Number(bill.taxAmt) || 0);
 
   const subs = allocate(Math.round(gross), weights);
   const svcs = allocate(Math.round(service), weights);

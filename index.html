@@ -2,54 +2,120 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Split Bill</title>
 <meta name="description" content="Split a bill by item, then send each person their share on WhatsApp.">
-<meta name="theme-color" content="#0f766e">
+<meta id="tc" name="theme-color" content="#f6f7f9">
+<script>
+  // Runs before first paint, so a saved theme never flashes the wrong one.
+  // try/catch: localStorage throws outright in some private-browsing modes.
+  try { document.documentElement.dataset.theme = localStorage.getItem('split-bill-theme') || 'auto'; }
+  catch { document.documentElement.dataset.theme = 'auto'; }
+</script>
 <style>
+  /* One palette, both schemes: light-dark() picks per the used color-scheme,
+     so the toggle only has to change color-scheme — and native controls
+     (inputs, scrollbars, the date picker) follow along for free. */
   :root {
-    --bg: #f6f7f9; --card: #fff; --ink: #14181f; --muted: #667085;
-    --line: #e3e6ea; --accent: #0f766e; --accent-ink: #fff; --chip: #eef1f4;
-    --danger: #b42318;
+    color-scheme: light dark;
+    --bg: light-dark(#f6f7f9, #0e1116);
+    --card: light-dark(#fff, #171b22);
+    --ink: light-dark(#14181f, #e8ebef);
+    --muted: light-dark(#667085, #98a2b3);
+    --line: light-dark(#e3e6ea, #262c36);
+    --accent: light-dark(#0f766e, #2dd4bf);
+    --accent-ink: light-dark(#fff, #04211d);
+    --chip: light-dark(#eef1f4, #222834);
+    --danger: light-dark(#b42318, #fda29b);
+    --veil: light-dark(rgba(246, 247, 249, .78), rgba(14, 17, 22, .78));
+    --shadow: 0 1px 2px light-dark(rgba(16, 24, 40, .05), rgba(0, 0, 0, .35)),
+              0 8px 22px light-dark(rgba(16, 24, 40, .05), rgba(0, 0, 0, .25));
+    /* Two speeds and one curve (ease-out-quart) for everything that moves. */
+    --tap: 110ms; --move: 220ms;
+    --ease: cubic-bezier(0.25, 1, 0.5, 1);
   }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #0e1116; --card: #171b22; --ink: #e8ebef; --muted: #98a2b3;
-      --line: #262c36; --accent: #2dd4bf; --accent-ink: #04211d; --chip: #222834;
-      --danger: #fda29b;
-    }
-  }
+  :root[data-theme=light] { color-scheme: light; }
+  :root[data-theme=dark] { color-scheme: dark; }
   * { box-sizing: border-box; }
   body {
-    margin: 0; padding: 18px 14px 48px; background: var(--bg); color: var(--ink);
+    margin: 0; background: var(--bg); color: var(--ink);
     font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    -webkit-text-size-adjust: 100%;
+    -webkit-text-size-adjust: 100%; -webkit-tap-highlight-color: transparent;
+    /* Room for the fixed bars top and bottom, plus the notch and home indicator. */
+    padding: calc(env(safe-area-inset-top) + 58px) 14px calc(env(safe-area-inset-bottom) + 86px);
+    overscroll-behavior-y: contain;
   }
-  main { max-width: 620px; margin: 0 auto; }
-  h1 { font-size: 22px; margin: 0 0 2px; letter-spacing: -0.02em; }
-  h1 + p { margin: 0 0 18px; color: var(--muted); font-size: 14px; }
+  main, .bar > div, .dock > div { max-width: 620px; margin: 0 auto; }
+
+  /* Fixed app bar. The hairline only appears once the content slides under it —
+     elevation as state, not decoration. */
+  .bar, .dock {
+    position: fixed; left: 0; right: 0; z-index: 20;
+    background: var(--veil); backdrop-filter: blur(16px) saturate(180%);
+  }
+  .bar {
+    top: 0; padding: calc(env(safe-area-inset-top) + 9px) 14px 9px;
+    border-bottom: 1px solid transparent;
+    transition: border-color var(--move) var(--ease);
+  }
+  .bar.lifted { border-bottom-color: var(--line); }
+  .bar > div { display: flex; align-items: center; gap: 10px; }
+  .dock {
+    bottom: 0; padding: 10px 14px calc(env(safe-area-inset-bottom) + 10px);
+    border-top: 1px solid var(--line);
+  }
+  .dock > div { display: flex; gap: 8px; }
+  .dock button { flex: 1; }
+
+  h1 { font-size: 17px; margin: 0; letter-spacing: -0.02em; flex: 1; }
+  .lede { margin: 0 0 16px; color: var(--muted); font-size: 14px; text-wrap: pretty; }
   section {
-    background: var(--card); border: 1px solid var(--line); border-radius: 14px;
-    padding: 14px; margin-bottom: 14px;
+    background: var(--card); border: 1px solid var(--line); border-radius: 16px;
+    padding: 14px; margin-bottom: 14px; box-shadow: var(--shadow);
   }
   h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 10px; }
   label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
   input, button, select { font: inherit; color: inherit; }
   input[type=text], input[type=number], input[type=date], input[type=tel] {
-    width: 100%; padding: 9px 11px; border: 1px solid var(--line); border-radius: 9px;
+    width: 100%; padding: 10px 11px; border: 1px solid var(--line); border-radius: 11px;
     background: var(--bg); min-width: 0;
+    transition: border-color var(--tap) var(--ease), background-color var(--tap) var(--ease);
   }
+  input:focus { border-color: var(--accent); }
+  ::placeholder { color: var(--muted); opacity: 1; }
   input:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   .row { display: flex; gap: 8px; align-items: end; }
   .row > * { flex: 1; }
   .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   button {
-    background: var(--chip); border: 1px solid var(--line); border-radius: 9px;
-    padding: 9px 13px; cursor: pointer;
+    background: var(--chip); border: 1px solid var(--line); border-radius: 11px;
+    padding: 10px 13px; cursor: pointer; touch-action: manipulation;
+    transition: transform var(--tap) var(--ease), background-color var(--tap) var(--ease),
+                color var(--tap) var(--ease), box-shadow var(--tap) var(--ease);
   }
-  button.primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; font-weight: 600; }
-  button.icon { flex: 0 0 auto; padding: 9px 11px; color: var(--danger); }
+  button:active { transform: scale(.96); }
+  button.primary {
+    background: var(--accent); color: var(--accent-ink); border-color: transparent;
+    font-weight: 600; box-shadow: var(--shadow);
+  }
+  button.icon { flex: 0 0 auto; padding: 10px 11px; color: var(--danger); }
   button.wa { flex: 0 0 auto; font-size: 13px; padding: 7px 11px; }
+
+  /* Theme switch: three labels, one sliding thumb driven by --i. */
+  .seg { position: relative; display: flex; padding: 3px; border-radius: 999px; background: var(--chip); }
+  .seg::before {
+    content: ''; position: absolute; top: 3px; bottom: 3px; left: 3px; width: calc((100% - 6px) / 3);
+    border-radius: 999px; background: var(--card); box-shadow: var(--shadow);
+    transform: translateX(calc(var(--i, 0) * 100%));
+    transition: transform var(--move) var(--ease);
+  }
+  .seg button {
+    position: relative; flex: 1 1 0; background: none; border: 0; box-shadow: none;
+    padding: 4px 10px; font-size: 12px; color: var(--muted); text-align: center;
+  }
+  .seg button[aria-pressed=true] { color: var(--ink); font-weight: 600; }
+  .seg button:active { transform: none; }
+
   .person { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
   .person input:first-child { flex: 1 1 40%; }
   .person input:nth-child(2) { flex: 1 1 60%; }
@@ -57,9 +123,10 @@
   .item:first-child { border-top: 0; padding-top: 0; margin-top: 0; }
   .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
   .chip {
-    padding: 5px 11px; border-radius: 999px; background: var(--chip);
+    padding: 6px 12px; border-radius: 999px; background: var(--chip);
     border: 1px solid transparent; font-size: 13px; cursor: pointer;
   }
+  .chip:active { transform: scale(.93); }
   .chip[aria-pressed=true] { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
   .hint { color: var(--muted); font-size: 13px; margin: 0; }
   .share { display: flex; justify-content: space-between; gap: 8px; padding: 9px 0; border-top: 1px dashed var(--line); }
@@ -69,15 +136,31 @@
   .totals { border-top: 1px solid var(--line); margin-top: 10px; padding-top: 10px; font-size: 14px; }
   .totals div { display: flex; justify-content: space-between; }
   .totals .grand { font-size: 17px; font-weight: 700; margin-top: 4px; }
-  .actions { display: flex; gap: 8px; flex-wrap: wrap; }
-  .actions button { flex: 1; }
-  footer { text-align: center; color: var(--muted); font-size: 12px; margin-top: 18px; }
+  footer { text-align: center; color: var(--muted); font-size: 12px; margin: 18px 0 0; }
+
+  /* Rows arrive; they don't blink into place. Only the row just added gets this. */
+  @keyframes settle { from { opacity: 0; transform: translateY(-7px) scale(.985); } }
+  .enter { animation: settle var(--move) var(--ease); }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+  }
 </style>
 </head>
 <body>
+<header class="bar">
+  <div>
+    <h1>Split Bill</h1>
+    <div class="seg" id="theme" role="group" aria-label="Theme">
+      <button data-theme="auto" aria-pressed="true">Auto</button>
+      <button data-theme="light" aria-pressed="false">Light</button>
+      <button data-theme="dark" aria-pressed="false">Dark</button>
+    </div>
+  </div>
+</header>
+
 <main>
-  <h1>Split Bill</h1>
-  <p>Tag who shared each item, then send everyone their share on WhatsApp.</p>
+  <p class="lede">Tag who shared each item, then send everyone their share on WhatsApp.</p>
 
   <section>
     <div class="grid2">
@@ -103,7 +186,9 @@
     <h2>Service, tax &amp; discount</h2>
     <div class="grid2">
       <div><label for="svc">Service charge %</label><input id="svc" type="number" min="-100" max="100" step="0.1" inputmode="decimal"></div>
+      <div><label for="svcAmt">Service charge (Rp)</label><input id="svcAmt" type="number" step="1" inputmode="decimal"></div>
       <div><label for="tax">Tax / PPN %</label><input id="tax" type="number" min="-100" max="100" step="0.1" inputmode="decimal"></div>
+      <div><label for="taxAmt">Tax / PPN (Rp)</label><input id="taxAmt" type="number" step="1" inputmode="decimal"></div>
     </div>
     <label style="margin-top:10px; display:flex; gap:8px; align-items:center">
       <input id="tos" type="checkbox" style="width:auto"> Charge tax on top of the service charge
@@ -120,15 +205,15 @@
     <div id="summary"></div>
   </section>
 
-  <section>
-    <div class="actions">
-      <button id="pdf" class="primary">📄 PDF</button>
-      <button id="reset">Start over</button>
-    </div>
-  </section>
-
   <footer>Everything stays in this browser. Nothing is uploaded.</footer>
 </main>
+
+<nav class="dock">
+  <div>
+    <button id="pdf" class="primary">📄 PDF</button>
+    <button id="reset">Start over</button>
+  </div>
+</nav>
 
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"
         integrity="sha384-en/ztfPSRkGfME4KIm05joYXynqzUgbsG5nMrj/xEFAHXkeZfO3yMK8QQ+mP7p1/"
@@ -150,10 +235,13 @@ function el(tag, props = {}, kids = []) {
 const blank = () => ({
   title: '', date: new Date().toISOString().slice(0, 10),
   participants: [], phones: {}, items: [],
-  servicePct: 5, taxPct: 11, taxOnService: true, discount: '', discountPct: '',
+  servicePct: 5, serviceAmt: '', taxPct: 11, taxAmt: '', taxOnService: true,
+  discount: '', discountPct: '',
 });
 
-const FIELDS = [['title', 'title'], ['date', 'date'], ['svc', 'servicePct'], ['tax', 'taxPct'],
+const FIELDS = [['title', 'title'], ['date', 'date'],
+                ['svc', 'servicePct'], ['svcAmt', 'serviceAmt'],
+                ['tax', 'taxPct'], ['taxAmt', 'taxAmt'],
                 ['disc', 'discount'], ['discPct', 'discountPct']];
 
 let bill;
@@ -168,6 +256,47 @@ bill.items = (Array.isArray(bill.items) ? bill.items : []).map((it) => ({
 if (!bill.phones || typeof bill.phones !== 'object') bill.phones = {};
 
 const save = () => localStorage.setItem(KEY, JSON.stringify(bill));
+
+// --- theme ------------------------------------------------------------------
+// Auto follows the OS; light/dark pin it. Only color-scheme changes — every
+// colour is a light-dark() pair, so the whole palette (and the native controls)
+// flips with it.
+const THEMES = ['auto', 'light', 'dark'];
+const seg = $('theme');
+const systemDark = matchMedia('(prefers-color-scheme: dark)');
+
+function setTheme(v, persist) {
+  document.documentElement.dataset.theme = v;
+  seg.style.setProperty('--i', THEMES.indexOf(v)); // slides the thumb
+  for (const b of seg.children) b.setAttribute('aria-pressed', String(b.dataset.theme === v));
+  // Match the browser chrome to the app bar, or the seam shows on mobile.
+  $('tc').content = (v === 'dark' || (v === 'auto' && systemDark.matches)) ? '#0e1116' : '#f6f7f9';
+  if (persist) localStorage.setItem('split-bill-theme', v);
+}
+seg.onclick = (e) => {
+  const v = e.target.closest('button')?.dataset.theme;
+  if (v) setTheme(v, true);
+};
+systemDark.onchange = () => setTheme(document.documentElement.dataset.theme);
+setTheme(THEMES.includes(document.documentElement.dataset.theme) ? document.documentElement.dataset.theme : 'auto');
+
+// The app bar earns its hairline only once content is scrolled under it.
+const bar = document.querySelector('.bar');
+addEventListener('scroll', () => bar.classList.toggle('lifted', scrollY > 4), { passive: true });
+
+// Rows slide out before they're gone, so a delete reads as a delete.
+const still = matchMedia('(prefers-reduced-motion: reduce)');
+const swipeOut = (node) => (still.matches || !node?.animate
+  ? Promise.resolve()
+  : node.animate({ opacity: [1, 0], transform: ['none', 'translateX(22px)'] },
+      { duration: 160, easing: 'cubic-bezier(.4, 0, 1, 1)', fill: 'forwards' })
+      // A re-render mid-flight cancels the animation and rejects. Swallow it —
+      // the delete still has to happen.
+      .finished.catch(() => {}));
+
+// The row just added is the only one that animates in — a re-render of the
+// whole list must not replay every entrance.
+const markNew = (boxId, sel) => $(boxId).querySelector(`${sel}:last-of-type`)?.classList.add('enter');
 
 // --- header + charges -------------------------------------------------------
 for (const [id, key] of FIELDS) {
@@ -202,7 +331,8 @@ function renderPeople() {
     };
     const del = el('button', {
       className: 'icon', title: `Remove ${name}`, textContent: '✕',
-      onclick: () => {
+      onclick: async () => {
+        await swipeOut(del.closest('.person'));
         bill.participants.splice(i, 1);
         delete bill.phones[name];
         bill.items.forEach((it) => { it.sharedBy = it.sharedBy.filter((p) => p !== name); });
@@ -219,7 +349,8 @@ $('addPerson').onclick = () => {
   while (bill.participants.includes(`Person ${n}`)) n++;
   bill.participants.push(`Person ${n}`);
   save(); renderAll();
-  $('people').querySelector('.person:last-child input')?.select();
+  markNew('people', '.person');
+  $('people').querySelector('.person:last-of-type input')?.select();
 };
 
 // --- items -----------------------------------------------------------------
@@ -236,27 +367,37 @@ function renderItems() {
     amount.oninput = () => { item.amount = amount.value; save(); renderSummary(); };
     const del = el('button', {
       className: 'icon', title: 'Remove item', textContent: '✕',
-      onclick: () => { bill.items.splice(i, 1); save(); renderAll(); },
+      onclick: async () => {
+        await swipeOut(del.closest('.item'));
+        bill.items.splice(i, 1); save(); renderAll();
+      },
     });
 
+    // Tagging repaints only this chip row, never the whole list — the colour
+    // transition survives, and whatever you were typing keeps its focus.
     const chips = el('div', { className: 'chips' });
-    if (bill.participants.length) {
-      chips.append(el('button', {
-        className: 'chip', textContent: item.sharedBy.length ? 'Everyone' : 'Everyone ✓',
-        title: 'Split across everyone', onclick: () => { item.sharedBy = []; save(); renderAll(); },
-      }));
-      for (const p of bill.participants) {
-        const on = item.sharedBy.includes(p);
-        const chip = el('button', { className: 'chip', textContent: p, onclick: () => {
-          item.sharedBy = on ? item.sharedBy.filter((x) => x !== p) : [...item.sharedBy, p];
-          save(); renderAll();
+    const paintChips = () => {
+      chips.textContent = '';
+      if (!bill.participants.length) {
+        chips.append(el('p', { className: 'hint', textContent: 'Add participants to tag this item.' }));
+        return;
+      }
+      const tag = (text, on, toggle) => {
+        const chip = el('button', { className: 'chip', textContent: text, onclick: () => {
+          toggle(); save(); paintChips(); renderSummary();
         } });
         chip.setAttribute('aria-pressed', String(on));
         chips.append(chip);
+      };
+      tag('Everyone', !item.sharedBy.length, () => { item.sharedBy = []; });
+      for (const p of bill.participants) {
+        const on = item.sharedBy.includes(p);
+        tag(p, on, () => {
+          item.sharedBy = on ? item.sharedBy.filter((x) => x !== p) : [...item.sharedBy, p];
+        });
       }
-    } else {
-      chips.append(el('p', { className: 'hint', textContent: 'Add participants to tag this item.' }));
-    }
+    };
+    paintChips();
 
     box.append(el('div', { className: 'item' }, [el('div', { className: 'row' }, [name, amount, del]), chips]));
   });
@@ -266,14 +407,16 @@ function renderItems() {
 $('addItem').onclick = () => {
   bill.items.push({ name: '', amount: '', sharedBy: [] });
   save(); renderAll();
-  $('items').querySelector('.item:last-child input')?.focus();
+  markNew('items', '.item');
+  $('items').querySelector('.item:last-of-type input')?.focus();
 };
 
 // --- summary + sharing ------------------------------------------------------
 let result = { people: [], subtotal: 0, service: 0, tax: 0, total: 0 };
 
 const label = () => `${bill.title?.trim() || 'Split Bill'}${bill.date ? ` (${bill.date})` : ''}`;
-const discLabel = () => `Discount${Number(bill.discountPct) ? ` ${bill.discountPct}%` : ''}`;
+// "Service 5%" when a percentage drives it, plain "Service" when it's a flat amount.
+const chargeLabel = (name, pct) => `${name}${Number(pct) ? ` ${pct}%` : ''}`;
 
 // The message each person receives. Same numbers as the PDF, just plain text.
 function messageFor(p) {
@@ -316,9 +459,9 @@ function renderSummary() {
   }
   const t = el('div', { className: 'totals' });
   t.append(el('div', {}, [el('span', { textContent: 'Subtotal' }), el('span', { textContent: `Rp ${money(result.subtotal)}` })]));
-  if (result.service) t.append(el('div', {}, [el('span', { textContent: `Service ${bill.servicePct}%` }), el('span', { textContent: `Rp ${money(result.service)}` })]));
-  if (result.tax) t.append(el('div', {}, [el('span', { textContent: `Tax ${bill.taxPct}%` }), el('span', { textContent: `Rp ${money(result.tax)}` })]));
-  if (result.discount) t.append(el('div', {}, [el('span', { textContent: `${discLabel()} (÷${result.people.length})` }), el('span', { textContent: `− Rp ${money(result.discount)}` })]));
+  if (result.service) t.append(el('div', {}, [el('span', { textContent: chargeLabel('Service', bill.servicePct) }), el('span', { textContent: `Rp ${money(result.service)}` })]));
+  if (result.tax) t.append(el('div', {}, [el('span', { textContent: chargeLabel('Tax', bill.taxPct) }), el('span', { textContent: `Rp ${money(result.tax)}` })]));
+  if (result.discount) t.append(el('div', {}, [el('span', { textContent: `${chargeLabel('Discount', bill.discountPct)} (÷${result.people.length})` }), el('span', { textContent: `− Rp ${money(result.discount)}` })]));
   t.append(el('div', { className: 'grand' }, [el('span', { textContent: 'Total' }), el('span', { textContent: `Rp ${money(result.total)}` })]));
   box.append(t);
 }
@@ -353,9 +496,9 @@ function buildPdf() {
   }
   rule();
   line('Subtotal', `Rp ${money(result.subtotal)}`, { bold: true });
-  if (result.service) line(`Service charge ${bill.servicePct}%`, `Rp ${money(result.service)}`);
-  if (result.tax) line(`Tax ${bill.taxPct}%`, `Rp ${money(result.tax)}`);
-  if (result.discount) line(`${discLabel()} (split ${result.people.length})`, `- Rp ${money(result.discount)}`);
+  if (result.service) line(chargeLabel('Service charge', bill.servicePct), `Rp ${money(result.service)}`);
+  if (result.tax) line(chargeLabel('Tax', bill.taxPct), `Rp ${money(result.tax)}`);
+  if (result.discount) line(`${chargeLabel('Discount', bill.discountPct)} (split ${result.people.length})`, `- Rp ${money(result.discount)}`);
   line('TOTAL', `Rp ${money(result.total)}`, { size: 12, bold: true, gap: 28 });
 
   line('WHO PAYS WHAT', null, { size: 9, bold: true, gap: 16 });

@@ -83,6 +83,30 @@ import { allocate, calcShares, waLink, waNumber } from './split.js';
   assert.equal(odd3.people.reduce((a, p) => a + p.total, 0), odd3.total);
 }
 
+// 2c. Service and tax as flat rupiah amounts, alongside or instead of the percentages.
+{
+  const base = { participants: ['A', 'B'], items: [{ name: 'x', amount: 200000, sharedBy: [] }] };
+  const flat = calcShares({ ...base, serviceAmt: 15000, taxAmt: 5000 });
+  assert.equal(flat.service, 15000);
+  assert.equal(flat.tax, 5000);
+  assert.equal(flat.total, 220000);
+
+  // flat service is taxed like a service charge should be
+  const mixed = calcShares({ ...base, serviceAmt: 20000, taxPct: 11 });
+  assert.equal(mixed.tax, 24200); // 11% of 220000
+  assert.equal(calcShares({ ...base, serviceAmt: 20000, taxPct: 11, taxOnService: false }).tax, 22000);
+
+  // percent and amount stack
+  const both = calcShares({ ...base, servicePct: 5, serviceAmt: 5000, taxPct: 10, taxAmt: 1000 });
+  assert.equal(both.service, 15000); // 10000 + 5000
+  assert.equal(both.tax, 22500); // 10% of 215000 + 1000
+  assert.equal(both.total, 237500);
+  assert.equal(both.people.reduce((a, p) => a + p.total, 0), both.total);
+
+  // garbage ignored
+  assert.equal(calcShares({ ...base, serviceAmt: 'x', taxAmt: null }).total, 200000);
+}
+
 // 3. Reconciliation under nasty rounding: shares must always sum to the total.
 for (const n of [3, 6, 7, 11]) {
   for (const amount of [10000, 33333, 1, 99999]) {
