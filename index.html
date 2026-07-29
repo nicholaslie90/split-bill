@@ -140,6 +140,16 @@
   .seg button[aria-pressed=true] { color: var(--ink); font-weight: 600; }
   .seg button:active { transform: none; }
 
+  /* Camera sheet. The dialog element brings its own backdrop and Esc handling. */
+  dialog {
+    border: 0; border-radius: 16px; padding: 14px; max-width: min(560px, 94vw);
+    background: var(--card); color: var(--ink); box-shadow: var(--shadow);
+  }
+  dialog::backdrop { background: light-dark(rgba(20, 24, 31, .55), rgba(0, 0, 0, .68)); }
+  dialog video {
+    display: block; width: 100%; max-height: 58vh; border-radius: 12px; background: #000;
+  }
+
   .person { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
   .person input:first-child { flex: 1 1 40%; }
   .person input:nth-child(2) { flex: 1 1 60%; }
@@ -219,10 +229,21 @@
       <button id="addItem">+ Add item</button>
       <button id="scan">📷 Scan a receipt</button>
     </div>
-    <!-- No capture attribute: that would force the camera open. Without it the
-         phone offers both — take a photo now, or use one from the library. -->
+    <!-- No capture attribute: that would force the OS camera and take the
+         choice away. This input is the "pick a photo I already have" path. -->
     <input id="shot" type="file" accept="image/*" hidden>
-    <p class="hint" id="scanNote" style="margin-top:8px" aria-live="polite">Scanning is best effort — a struk photo is read roughly, so check every name and amount afterwards. Service, tax and discount you still enter yourself. The photo never leaves your browser.</p>
+    <!-- Native dialog: modal behaviour, a backdrop and Esc to dismiss, without
+         a line of JavaScript to manage any of it. -->
+    <dialog id="cam" aria-label="Photograph the receipt">
+      <video id="feed" playsinline muted></video>
+      <p class="hint" style="margin:8px 0">Fill the frame with the receipt, straight on and in good light — that is most of what makes the reading accurate.</p>
+      <div class="row">
+        <button id="shoot" class="primary">Take photo</button>
+        <button id="pick">Choose a photo</button>
+        <button id="camClose">Cancel</button>
+      </div>
+    </dialog>
+    <p class="hint" id="scanNote" style="margin-top:8px" aria-live="polite">Photograph the struk with your camera, or pick a photo you already have. Scanning is best effort — a struk is read roughly, so check every name and amount afterwards. Service, tax and discount you still enter yourself. Nothing is uploaded: the photo and the reading both stay in your browser.</p>
   </section>
 
   <section>
@@ -561,11 +582,52 @@ const loadOcr = () => (ocr ??= new Promise((ok, fail) => {
 const note = (text) => { $('scanNote').textContent = text; };
 const KEEP = $('scanNote').textContent; // the standing best-effort caveat
 
-$('scan').onclick = () => $('shot').click();
-$('shot').onchange = async () => {
+// Two ways in — the camera or a photo already on the device — and one pipeline
+// out, so a scan behaves the same whichever way the picture arrived.
+const cam = $('cam');
+const feed = $('feed');
+let stream;
+const stopCam = () => { stream?.getTracks().forEach((t) => t.stop()); stream = null; };
+const closeCam = () => { stopCam(); if (cam.open) cam.close(); };
+cam.onclose = stopCam; // Esc and the backdrop close the dialog on their own
+
+$('scan').onclick = async () => {
+  // No camera API (or an insecure origin, where the browser hides it): just
+  // fall back to picking a photo — the reading is identical either way.
+  if (!navigator.mediaDevices?.getUserMedia) return $('shot').click();
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      // The back camera on a phone, and enough pixels to make small print legible.
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 } },
+    });
+  } catch {
+    note(`Couldn't open the camera — pick a photo instead. ${KEEP}`);
+    return $('shot').click();
+  }
+  feed.srcObject = stream;
+  cam.showModal();
+  await feed.play().catch(() => {}); // autoplay refusal isn't fatal; the frame is still there
+};
+
+$('camClose').onclick = closeCam;
+$('pick').onclick = () => { closeCam(); $('shot').click(); };
+
+$('shoot').onclick = () => {
+  const [w, h] = [feed.videoWidth, feed.videoHeight];
+  if (!w) return; // the stream hasn't handed over a frame yet
+  const shot = el('canvas', { width: w, height: h });
+  shot.getContext('2d').drawImage(feed, 0, 0);
+  closeCam();
+  shot.toBlob((blob) => blob && scanFile(new File([blob], 'receipt.jpg', { type: 'image/jpeg' })), 'image/jpeg', 0.92);
+};
+
+$('shot').onchange = () => {
   const file = $('shot').files?.[0];
   $('shot').value = ''; // so picking the same photo twice still fires
-  if (!file) return;
+  if (file) scanFile(file);
+};
+
+async function scanFile(file) {
   $('scan').disabled = true;
   note('Loading the scanner — a one-time download of about 4 MB…');
   try {
@@ -595,7 +657,7 @@ $('shot').onchange = async () => {
   } finally {
     $('scan').disabled = false;
   }
-};
+}
 
 // --- summary + sharing ------------------------------------------------------
 let result = { people: [], subtotal: 0, service: 0, tax: 0, total: 0 };
