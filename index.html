@@ -1,0 +1,394 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Split Bill</title>
+<meta name="description" content="Split a bill by item, then send each person their share on WhatsApp.">
+<meta name="theme-color" content="#0f766e">
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #fff; --ink: #14181f; --muted: #667085;
+    --line: #e3e6ea; --accent: #0f766e; --accent-ink: #fff; --chip: #eef1f4;
+    --danger: #b42318;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0e1116; --card: #171b22; --ink: #e8ebef; --muted: #98a2b3;
+      --line: #262c36; --accent: #2dd4bf; --accent-ink: #04211d; --chip: #222834;
+      --danger: #fda29b;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 18px 14px 48px; background: var(--bg); color: var(--ink);
+    font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    -webkit-text-size-adjust: 100%;
+  }
+  main { max-width: 620px; margin: 0 auto; }
+  h1 { font-size: 22px; margin: 0 0 2px; letter-spacing: -0.02em; }
+  h1 + p { margin: 0 0 18px; color: var(--muted); font-size: 14px; }
+  section {
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+    padding: 14px; margin-bottom: 14px;
+  }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 10px; }
+  label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+  input, button, select { font: inherit; color: inherit; }
+  input[type=text], input[type=number], input[type=date], input[type=tel] {
+    width: 100%; padding: 9px 11px; border: 1px solid var(--line); border-radius: 9px;
+    background: var(--bg); min-width: 0;
+  }
+  input:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .row { display: flex; gap: 8px; align-items: end; }
+  .row > * { flex: 1; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  button {
+    background: var(--chip); border: 1px solid var(--line); border-radius: 9px;
+    padding: 9px 13px; cursor: pointer;
+  }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; font-weight: 600; }
+  button.icon { flex: 0 0 auto; padding: 9px 11px; color: var(--danger); }
+  button.wa { flex: 0 0 auto; font-size: 13px; padding: 7px 11px; }
+  .person { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+  .person input:first-child { flex: 1 1 40%; }
+  .person input:nth-child(2) { flex: 1 1 60%; }
+  .item { border-top: 1px solid var(--line); padding-top: 10px; margin-top: 10px; }
+  .item:first-child { border-top: 0; padding-top: 0; margin-top: 0; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .chip {
+    padding: 5px 11px; border-radius: 999px; background: var(--chip);
+    border: 1px solid transparent; font-size: 13px; cursor: pointer;
+  }
+  .chip[aria-pressed=true] { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
+  .hint { color: var(--muted); font-size: 13px; margin: 0; }
+  .share { display: flex; justify-content: space-between; gap: 8px; padding: 9px 0; border-top: 1px dashed var(--line); }
+  .share:first-of-type { border-top: 0; }
+  .share b { font-variant-numeric: tabular-nums; }
+  .share ul { margin: 3px 0 0; padding-left: 16px; color: var(--muted); font-size: 13px; }
+  .totals { border-top: 1px solid var(--line); margin-top: 10px; padding-top: 10px; font-size: 14px; }
+  .totals div { display: flex; justify-content: space-between; }
+  .totals .grand { font-size: 17px; font-weight: 700; margin-top: 4px; }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .actions button { flex: 1; }
+  footer { text-align: center; color: var(--muted); font-size: 12px; margin-top: 18px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Split Bill</h1>
+  <p>Tag who shared each item, then send everyone their share on WhatsApp.</p>
+
+  <section>
+    <div class="grid2">
+      <div><label for="title">What / where</label><input id="title" type="text" placeholder="Dinner at Sate Khas" maxlength="80"></div>
+      <div><label for="date">Date</label><input id="date" type="date"></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Participants</h2>
+    <div id="people"></div>
+    <button id="addPerson">+ Add participant</button>
+    <p class="hint" style="margin-top:8px">Phone is optional — leave it blank and WhatsApp will ask you who to send to.</p>
+  </section>
+
+  <section>
+    <h2>Items</h2>
+    <div id="items"></div>
+    <button id="addItem" style="margin-top:10px">+ Add item</button>
+  </section>
+
+  <section>
+    <h2>Service &amp; tax</h2>
+    <div class="grid2">
+      <div><label for="svc">Service charge %</label><input id="svc" type="number" min="-100" max="100" step="0.1" inputmode="decimal"></div>
+      <div><label for="tax">Tax / PPN %</label><input id="tax" type="number" min="-100" max="100" step="0.1" inputmode="decimal"></div>
+    </div>
+    <label style="margin-top:10px; display:flex; gap:8px; align-items:center">
+      <input id="tos" type="checkbox" style="width:auto"> Charge tax on top of the service charge
+    </label>
+  </section>
+
+  <section>
+    <h2>Who pays what</h2>
+    <div id="summary"></div>
+  </section>
+
+  <section>
+    <div class="actions">
+      <button id="pdf" class="primary">📄 PDF</button>
+      <button id="reset">Start over</button>
+    </div>
+  </section>
+
+  <footer>Everything stays in this browser. Nothing is uploaded.</footer>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"
+        integrity="sha384-en/ztfPSRkGfME4KIm05joYXynqzUgbsG5nMrj/xEFAHXkeZfO3yMK8QQ+mP7p1/"
+        crossorigin="anonymous" referrerpolicy="no-referrer" defer></script>
+
+<script type="module">
+import { calcShares, money, waLink } from './split.js';
+
+const KEY = 'split-bill';
+const $ = (id) => document.getElementById(id);
+
+// Build DOM instead of writing HTML strings — user-typed names never get parsed as markup.
+function el(tag, props = {}, kids = []) {
+  const n = Object.assign(document.createElement(tag), props);
+  for (const k of [].concat(kids)) if (k != null) n.append(k);
+  return n;
+}
+
+const blank = () => ({
+  title: '', date: new Date().toISOString().slice(0, 10),
+  participants: [], phones: {}, items: [],
+  servicePct: 5, taxPct: 11, taxOnService: true,
+});
+
+let bill;
+try { bill = { ...blank(), ...JSON.parse(localStorage.getItem(KEY) || '{}') }; }
+catch { bill = blank(); }
+// Stored JSON is untrusted — an item without a sharedBy array, or a duplicate
+// name, would break the split. Normalise once instead of guarding everywhere.
+bill.participants = [...new Set((Array.isArray(bill.participants) ? bill.participants : []).map(String))];
+bill.items = (Array.isArray(bill.items) ? bill.items : []).map((it) => ({
+  name: '', amount: '', ...it, sharedBy: Array.isArray(it.sharedBy) ? it.sharedBy.map(String) : [],
+}));
+if (!bill.phones || typeof bill.phones !== 'object') bill.phones = {};
+
+const save = () => localStorage.setItem(KEY, JSON.stringify(bill));
+
+// --- header + charges -------------------------------------------------------
+for (const [id, key] of [['title', 'title'], ['date', 'date'], ['svc', 'servicePct'], ['tax', 'taxPct']]) {
+  $(id).value = bill[key];
+  $(id).oninput = () => { bill[key] = $(id).value; save(); renderSummary(); };
+}
+$('tos').checked = bill.taxOnService !== false;
+$('tos').onchange = () => { bill.taxOnService = $('tos').checked; save(); renderSummary(); };
+
+// --- participants ----------------------------------------------------------
+function renderPeople() {
+  const box = $('people');
+  box.textContent = '';
+  bill.participants.forEach((name, i) => {
+    const nameIn = el('input', { type: 'text', value: name, placeholder: 'Name', maxLength: 40, ariaLabel: 'Participant name' });
+    const phoneIn = el('input', { type: 'tel', value: bill.phones[name] ?? '', placeholder: 'Phone (optional)', maxLength: 24, ariaLabel: 'Phone number, optional' });
+    // Renaming moves the phone and retags every item, so nobody silently loses their share.
+    nameIn.onchange = () => {
+      const next = nameIn.value.trim();
+      if (!next || bill.participants.some((p, j) => j !== i && p === next)) { nameIn.value = name; return; }
+      const phone = bill.phones[name];
+      delete bill.phones[name];
+      if (phone) bill.phones[next] = phone;
+      bill.items.forEach((it) => { it.sharedBy = it.sharedBy.map((p) => (p === name ? next : p)); });
+      bill.participants[i] = next;
+      save(); renderAll();
+    };
+    phoneIn.oninput = () => {
+      const v = phoneIn.value.trim();
+      if (v) bill.phones[bill.participants[i]] = v; else delete bill.phones[bill.participants[i]];
+      save(); renderSummary();
+    };
+    const del = el('button', {
+      className: 'icon', title: `Remove ${name}`, textContent: '✕',
+      onclick: () => {
+        bill.participants.splice(i, 1);
+        delete bill.phones[name];
+        bill.items.forEach((it) => { it.sharedBy = it.sharedBy.filter((p) => p !== name); });
+        save(); renderAll();
+      },
+    });
+    box.append(el('div', { className: 'person' }, [nameIn, phoneIn, del]));
+  });
+  if (!bill.participants.length) box.append(el('p', { className: 'hint', textContent: 'Add the people sharing this bill.' }));
+}
+
+$('addPerson').onclick = () => {
+  let n = bill.participants.length + 1;
+  while (bill.participants.includes(`Person ${n}`)) n++;
+  bill.participants.push(`Person ${n}`);
+  save(); renderAll();
+  $('people').querySelector('.person:last-child input')?.select();
+};
+
+// --- items -----------------------------------------------------------------
+function renderItems() {
+  const box = $('items');
+  box.textContent = '';
+  bill.items.forEach((item, i) => {
+    const name = el('input', { type: 'text', value: item.name, placeholder: 'Item', maxLength: 60, ariaLabel: 'Item name' });
+    name.oninput = () => { item.name = name.value; save(); renderSummary(); };
+    const amount = el('input', {
+      type: 'number', value: item.amount, placeholder: '0', min: '0', step: '1',
+      inputMode: 'decimal', ariaLabel: 'Amount',
+    });
+    amount.oninput = () => { item.amount = amount.value; save(); renderSummary(); };
+    const del = el('button', {
+      className: 'icon', title: 'Remove item', textContent: '✕',
+      onclick: () => { bill.items.splice(i, 1); save(); renderAll(); },
+    });
+
+    const chips = el('div', { className: 'chips' });
+    if (bill.participants.length) {
+      chips.append(el('button', {
+        className: 'chip', textContent: item.sharedBy.length ? 'Everyone' : 'Everyone ✓',
+        title: 'Split across everyone', onclick: () => { item.sharedBy = []; save(); renderAll(); },
+      }));
+      for (const p of bill.participants) {
+        const on = item.sharedBy.includes(p);
+        const chip = el('button', { className: 'chip', textContent: p, onclick: () => {
+          item.sharedBy = on ? item.sharedBy.filter((x) => x !== p) : [...item.sharedBy, p];
+          save(); renderAll();
+        } });
+        chip.setAttribute('aria-pressed', String(on));
+        chips.append(chip);
+      }
+    } else {
+      chips.append(el('p', { className: 'hint', textContent: 'Add participants to tag this item.' }));
+    }
+
+    box.append(el('div', { className: 'item' }, [el('div', { className: 'row' }, [name, amount, del]), chips]));
+  });
+  if (!bill.items.length) box.append(el('p', { className: 'hint', textContent: 'No items yet.' }));
+}
+
+$('addItem').onclick = () => {
+  bill.items.push({ name: '', amount: '', sharedBy: [] });
+  save(); renderAll();
+  $('items').querySelector('.item:last-child input')?.focus();
+};
+
+// --- summary + sharing ------------------------------------------------------
+let result = { people: [], subtotal: 0, service: 0, tax: 0, total: 0 };
+
+const label = () => `${bill.title?.trim() || 'Split Bill'}${bill.date ? ` (${bill.date})` : ''}`;
+
+// The message each person receives. Same numbers as the PDF, just plain text.
+function messageFor(p) {
+  const lines = p.lines.map((l) => `• ${l.name || 'Item'} — Rp ${money(l.share)}${l.sharedBy > 1 ? ` (split ${l.sharedBy})` : ''}`);
+  const extras = [
+    p.service ? `Service: Rp ${money(p.service)}` : null,
+    p.tax ? `Tax: Rp ${money(p.tax)}` : null,
+  ].filter(Boolean);
+  return [
+    `*${label()}*`, '', `Hi ${p.name}, your share is *Rp ${money(p.total)}*`, '',
+    ...lines, ...(lines.length ? [`Subtotal: Rp ${money(p.subtotal)}`] : []), ...extras,
+  ].join('\n');
+}
+
+function renderSummary() {
+  result = calcShares(bill);
+  const box = $('summary');
+  box.textContent = '';
+  if (!result.people.length) {
+    box.append(el('p', { className: 'hint', textContent: 'Add participants and items to see the split.' }));
+    return;
+  }
+  for (const p of result.people) {
+    const left = el('div', {}, [el('b', { textContent: p.name })]);
+    if (p.lines.length) {
+      left.append(el('ul', {}, p.lines.map((l) =>
+        el('li', { textContent: `${l.name || 'Item'} — ${money(l.share)}${l.sharedBy > 1 ? ` (÷${l.sharedBy})` : ''}` }))));
+    }
+    const wa = el('button', {
+      className: 'wa', textContent: bill.phones[p.name] ? '▸ WhatsApp' : '▸ WhatsApp…',
+      title: bill.phones[p.name] ? `Send to ${bill.phones[p.name]}` : 'Pick the contact in WhatsApp',
+      onclick: () => window.open(waLink(bill.phones[p.name], messageFor(p)), '_blank', 'noopener'),
+    });
+    const right = el('div', { style: 'text-align:right; white-space:nowrap' }, [
+      el('div', {}, [el('b', { textContent: `Rp ${money(p.total)}` })]),
+      el('div', { style: 'margin-top:6px' }, [wa]),
+    ]);
+    box.append(el('div', { className: 'share' }, [left, right]));
+  }
+  const t = el('div', { className: 'totals' });
+  t.append(el('div', {}, [el('span', { textContent: 'Subtotal' }), el('span', { textContent: `Rp ${money(result.subtotal)}` })]));
+  if (result.service) t.append(el('div', {}, [el('span', { textContent: `Service ${bill.servicePct}%` }), el('span', { textContent: `Rp ${money(result.service)}` })]));
+  if (result.tax) t.append(el('div', {}, [el('span', { textContent: `Tax ${bill.taxPct}%` }), el('span', { textContent: `Rp ${money(result.tax)}` })]));
+  t.append(el('div', { className: 'grand' }, [el('span', { textContent: 'Total' }), el('span', { textContent: `Rp ${money(result.total)}` })]));
+  box.append(t);
+}
+
+function renderAll() { renderPeople(); renderItems(); renderSummary(); }
+renderAll();
+
+// --- PDF -------------------------------------------------------------------
+function buildPdf() {
+  const { jsPDF } = window.jspdf ?? {};
+  if (!jsPDF) throw new Error('PDF library did not load — check your connection.');
+  const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+  const W = 595, M = 44, RIGHT = W - M;
+  let y = 56;
+  const page = (need = 16) => { if (y + need > 800) { doc.addPage(); y = 56; } };
+  const line = (left, right, { size = 10, bold = false, gap = 15, indent = 0 } = {}) => {
+    page(gap);
+    doc.setFont('helvetica', bold ? 'bold' : 'normal').setFontSize(size);
+    doc.text(String(left), M + indent, y);
+    if (right != null) doc.text(String(right), RIGHT, y, { align: 'right' });
+    y += gap;
+  };
+  const rule = () => { page(10); doc.setDrawColor(210).line(M, y - 9, RIGHT, y - 9); };
+
+  line(bill.title?.trim() || 'Split Bill', null, { size: 17, bold: true, gap: 20 });
+  line(bill.date || '', `Total  Rp ${money(result.total)}`, { size: 10, gap: 24 });
+
+  line('ITEMS', null, { size: 9, bold: true, gap: 16 });
+  for (const it of bill.items) {
+    const who = it.sharedBy.length ? it.sharedBy.join(', ') : 'everyone';
+    line(`${it.name || 'Item'}  —  ${who}`, `Rp ${money(Number(it.amount) || 0)}`);
+  }
+  rule();
+  line('Subtotal', `Rp ${money(result.subtotal)}`, { bold: true });
+  if (result.service) line(`Service charge ${bill.servicePct}%`, `Rp ${money(result.service)}`);
+  if (result.tax) line(`Tax ${bill.taxPct}%`, `Rp ${money(result.tax)}`);
+  line('TOTAL', `Rp ${money(result.total)}`, { size: 12, bold: true, gap: 28 });
+
+  line('WHO PAYS WHAT', null, { size: 9, bold: true, gap: 16 });
+  for (const p of result.people) {
+    line(p.name, `Rp ${money(p.total)}`, { size: 11, bold: true });
+    for (const l of p.lines) {
+      line(`${l.name || 'Item'}${l.sharedBy > 1 ? ` (split ${l.sharedBy})` : ''}`, `Rp ${money(l.share)}`, { size: 9, gap: 13, indent: 12 });
+    }
+    if (p.service) line('Service charge', `Rp ${money(p.service)}`, { size: 9, gap: 13, indent: 12 });
+    if (p.tax) line('Tax', `Rp ${money(p.tax)}`, { size: 9, gap: 13, indent: 12 });
+    y += 6;
+  }
+  return doc;
+}
+
+$('pdf').onclick = async () => {
+  if (!result.people.length) return alert('Add participants and items first.');
+  try {
+    const doc = buildPdf();
+    const name = `${(bill.title?.trim() || 'split-bill').replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-${bill.date || ''}.pdf`;
+    const file = new File([doc.output('blob')], name, { type: 'application/pdf' });
+    // Mobile: the share sheet hands the PDF straight to WhatsApp. Desktop: download it.
+    if (navigator.canShare?.({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file], title: label() });
+      } catch (e) {
+        if (e.name === 'AbortError') return; // user closed the share sheet
+        doc.save(name); // share exists but refused it — still give them the file
+      }
+    } else {
+      doc.save(name);
+    }
+  } catch (e) {
+    alert(e.message);
+  }
+};
+
+$('reset').onclick = () => {
+  if (!confirm('Clear this bill and start over?')) return;
+  bill = blank();
+  save();
+  for (const [id, key] of [['title', 'title'], ['date', 'date'], ['svc', 'servicePct'], ['tax', 'taxPct']]) $(id).value = bill[key];
+  $('tos').checked = true;
+  renderAll();
+};
+</script>
+</body>
+</html>
