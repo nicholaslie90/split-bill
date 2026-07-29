@@ -6,6 +6,9 @@
 <title>Split Bill</title>
 <meta name="description" content="Split a bill by item, then send each person their share on WhatsApp.">
 <meta id="tc" name="theme-color" content="#f6f7f9">
+<!-- Same mark as the header logo: one disc cut into two unequal shares.
+     Inline SVG — no extra file, no extra request, sharp at every size. -->
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%230f766e'/><g transform='rotate(-20 16 16)'><path d='M14.5 5A11 11 0 0 0 14.5 27Z' fill='%23fff'/><path d='M17.5 5A11 11 0 0 1 17.5 27Z' fill='%23fff' opacity='.5'/></g></svg>">
 <script>
   // Runs before first paint, so a saved theme never flashes the wrong one.
   // try/catch: localStorage throws outright in some private-browsing modes.
@@ -59,7 +62,7 @@
     transition: border-color var(--move) var(--ease);
   }
   .bar.lifted { border-bottom-color: var(--line); }
-  .bar > div { display: flex; align-items: center; gap: 10px; }
+  .bar > div { display: flex; align-items: center; gap: 9px; }
   .dock {
     bottom: 0; padding: 10px 14px calc(env(safe-area-inset-bottom) + 10px);
     border-top: 1px solid var(--line);
@@ -67,6 +70,7 @@
   .dock > div { display: flex; gap: 8px; }
   .dock button { flex: 1; }
 
+  .logo { flex: 0 0 auto; color: var(--accent); }
   h1 { font-size: 17px; margin: 0; letter-spacing: -0.02em; flex: 1; }
   .lede { margin: 0 0 16px; color: var(--muted); font-size: 14px; text-wrap: pretty; }
   section {
@@ -150,6 +154,14 @@
 <body>
 <header class="bar">
   <div>
+    <!-- The mark carries the whole idea: one bill, cut into unequal shares.
+         currentColor, so it re-tints with the theme along with everything else. -->
+    <svg class="logo" viewBox="0 0 24 24" width="27" height="27" aria-hidden="true">
+      <g transform="rotate(-20 12 12)">
+        <path d="M11 2A10 10 0 0 0 11 22Z" fill="currentColor"/>
+        <path d="M13 2A10 10 0 0 1 13 22Z" fill="currentColor" opacity=".42"/>
+      </g>
+    </svg>
     <h1>Split Bill</h1>
     <div class="seg" id="theme" role="group" aria-label="Theme">
       <button data-theme="auto" aria-pressed="true">Auto</button>
