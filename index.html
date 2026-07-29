@@ -14,6 +14,16 @@
   // try/catch: localStorage throws outright in some private-browsing modes.
   try { document.documentElement.dataset.theme = localStorage.getItem('split-bill-theme') || 'auto'; }
   catch { document.documentElement.dataset.theme = 'auto'; }
+
+  // If the module below fails to load, every button goes quietly dead — no
+  // error anywhere the user can see. Say it out loud instead. Registered here,
+  // in a classic script, because it has to be listening before the module runs.
+  addEventListener('error', (e) => {
+    const p = document.createElement('p');
+    p.style.cssText = 'margin:0;padding:12px 14px;background:#b42318;color:#fff;font:14px/1.4 system-ui,sans-serif;position:relative;z-index:30';
+    p.textContent = `This page didn't load properly (${e.message || e.filename || 'unknown error'}). Reload it — and if that doesn't help, reload while holding Shift to clear the cached files.`;
+    document.body?.prepend(p);
+  }, { once: true });
 </script>
 <style>
   /* One palette, both schemes: light-dark() picks per the used color-scheme,
@@ -282,7 +292,10 @@
         crossorigin="anonymous" referrerpolicy="no-referrer" defer></script>
 
 <script type="module">
-import { calcShares, collect, digits, fmtDate, group, money, parseReceipt, setMoneySeparator, toCsv, waLink } from './split.js';
+// The ?v= is not decoration: this page and split.js are cached separately, so a
+// browser holding yesterday's split.js while loading today's page would fail to
+// import and leave every button dead. Bump it whenever split.js gains an export.
+import { calcShares, collect, digits, fmtDate, group, money, parseReceipt, setMoneySeparator, toCsv, waLink } from './split.js?v=2';
 
 const KEY = 'split-bill';
 const $ = (id) => document.getElementById(id);
