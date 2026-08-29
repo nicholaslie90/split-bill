@@ -41,7 +41,7 @@ The scan is a **starting point, not an answer**. A struk is thermal-printed, cre
 - Opens the camera in the page (`getUserMedia`, back camera where there is one) with a live preview, and grabs a single frame when you press **Take photo**. The stream is stopped the moment the sheet closes. No camera, no permission, or an insecure origin → it falls back to picking a photo, which reads exactly the same way.
 - Whichever reader runs, the photo is greyed and cut to 1600px first. A raw 12 MP photo reads as noise.
 - Scanned items are **added** to whatever is already there, never replacing it, and are ordinary editable rows.
-- The photo is kept with the bill and goes on the **last page of the PDF**, so a number can be checked against the paper it came from. A **Remove photo** button appears under the scan button while one is attached; scanning again replaces it, and **Start over** clears it. It is the only large thing in storage, so if it ever won't fit the bill is saved without it and the scan note says so.
+- The photo is kept with the bill and goes on the **last page of the PDF**, so a number can be checked against the paper it came from. Under the scan button a row always says whether one is attached, with **Add photo** / **Remove photo** beside it — attaching this way stores the photo without reading it, which is what you want when the items are already right and re-scanning would only add them twice. Scanning replaces it, and **Start over** clears it. It is the only large thing in storage, so if it ever won't fit the bill is saved without it and the scan note says so.
 
 ### On your phone, by default
 

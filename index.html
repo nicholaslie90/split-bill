@@ -244,12 +244,15 @@
       </div>
     </dialog>
     <p class="hint" id="scanNote" style="margin-top:8px" aria-live="polite"></p>
-    <!-- Only there once a struk has been scanned: the photo is invisible until
-         the PDF, so it says so, and offers the way back out. -->
-    <div class="row" id="photoRow" hidden style="margin-top:10px">
+    <!-- Always here, whether or not a photo is attached: the struk is invisible
+         until the PDF is opened, and a row that appears only when there is one
+         can't tell you that there isn't. Scanning attaches one; so does this,
+         without re-reading the items you already have. -->
+    <div class="row" id="photoRow" style="margin-top:10px">
       <p class="hint" id="photoNote" style="flex:1 1 auto"></p>
-      <button id="photoDrop" style="flex:0 0 auto">Remove photo</button>
+      <button id="photoDrop" style="flex:0 0 auto"></button>
     </div>
+    <input id="photoPick" type="file" accept="image/*" hidden>
     <!-- Optional, and the only thing on this page that ever leaves the device.
          Kept out of the bill so "Start over" and the exports can't carry it. -->
     <div style="margin-top:10px">
@@ -931,19 +934,40 @@ function renderSummary() {
   box.append(t);
 }
 
-// The struk photo has nowhere to show itself until the PDF is opened, so the
-// row is the only sign it is there — and the only way to change your mind.
+// The struk photo has nowhere to show itself until the PDF is opened, so this
+// row is the only sign of whether there is one — which is exactly why it says
+// so in both directions rather than appearing only when there is.
 function renderPhoto() {
-  $('photoRow').hidden = !bill.photo;
-  if (!bill.photo) return;
   const kb = Math.round((bill.photo.length * 3) / 4096); // base64 back to kilobytes
-  $('photoNote').textContent = `Struk photo attached, ${kb} KB — it goes on the last page of the PDF.`;
+  $('photoNote').textContent = bill.photo
+    ? `Struk photo attached, ${kb} KB — it goes on the last page of the PDF.`
+    : 'No struk photo — the PDF will be just the numbers.';
+  $('photoDrop').textContent = bill.photo ? 'Remove photo' : 'Add photo';
 }
+
 $('photoDrop').onclick = () => {
+  if (!bill.photo) return $('photoPick').click();
   bill.photo = '';
   save();
   renderPhoto();
   note(`Photo removed, so the PDF goes without it. ${KEEP()}`);
+};
+
+// Attaching a photo on its own, without reading it: for a bill whose items are
+// already right, where re-scanning would only add them all a second time.
+$('photoPick').onchange = async () => {
+  const file = $('photoPick').files?.[0];
+  $('photoPick').value = ''; // so picking the same photo twice still fires
+  if (!file) return;
+  try {
+    bill.photo = (await prepare(file)).toDataURL('image/jpeg', 0.8);
+    note(save()
+      ? `Photo attached — it goes on the last page of the PDF. ${KEEP()}`
+      : `That photo was too big to keep, so the PDF goes without it. ${KEEP()}`);
+  } catch {
+    note(`Couldn't read that photo — try another. ${KEEP()}`);
+  }
+  renderPhoto();
 };
 
 function renderAll() { renderPeople(); renderItems(); renderSummary(); renderPhoto(); }
