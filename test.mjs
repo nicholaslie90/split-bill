@@ -1,6 +1,6 @@
 // node test.mjs  — fails loudly if the money math breaks.
 import assert from 'node:assert/strict';
-import { calcShares, collect, digits, fmtDate, group, money, parseReceipt, roundToSum, setMoneySeparator, toCsv, waLink, waNumber } from './split.js';
+import { calcShares, collect, digits, fmtDate, group, money, parseGemini, parseReceipt, roundToSum, setMoneySeparator, shareLabel, sharedByLabel, toCsv, waLink, waNumber } from './split.js';
 
 // 1. The example from the brief: equal split per item, nobody pays for what they didn't eat.
 {
@@ -38,6 +38,43 @@ import { calcShares, collect, digits, fmtDate, group, money, parseReceipt, round
     taxOnService: false,
   });
   assert.equal(r.tax, 22000); // 11% of subtotal only
+}
+
+// 2a. One person taking two of a multi-unit line: the same name listed twice.
+// The struk's "4 LYCHEE ICE TEA 220.000" is four shares of 55.000, and Nic-Cin
+// drank two of them.
+{
+  const r = calcShares({
+    participants: ['Naren', 'Nakata', 'Pampir', 'Nic-Cin'],
+    items: [{ name: 'Lychee Ice Tea', amount: 220000, sharedBy: ['Naren', 'Nakata', 'Nic-Cin', 'Nic-Cin'] }],
+  });
+  assert.deepEqual(r.people.map((p) => p.total), [55000, 55000, 0, 110000]); // Pampir had none
+  assert.equal(r.total, 220000);
+  // Two shares of one item read as one line, not two.
+  const nic = r.people[3];
+  assert.equal(nic.lines.length, 1);
+  assert.deepEqual(nic.lines[0], { name: 'Lychee Ice Tea', share: 110000, sharedBy: 4, took: 2 });
+  assert.equal(shareLabel(nic.lines[0]), '2 of 4');
+  assert.equal(shareLabel(r.people[0].lines[0]), '1 of 4'); // Naren took one of the four
+
+  // Service and tax follow the shares, and everything still reconciles exactly.
+  const charged = calcShares({
+    participants: ['Naren', 'Nic-Cin'],
+    items: [{ name: 'Tea', amount: 100000, sharedBy: ['Naren', 'Nic-Cin', 'Nic-Cin'] }],
+    servicePct: 5, taxPct: 11,
+  });
+  assert.equal(charged.people[1].subtotal, 66667); // two of three shares, rounded up
+  assert.equal(charged.people.reduce((a, p) => a + p.total, 0), charged.total);
+  assert.equal(charged.people.reduce((a, p) => a + p.subtotal, 0), charged.subtotal);
+}
+
+// 2a-2. The tally read out for a person or a whole line.
+{
+  assert.equal(sharedByLabel(['Nic-Cin', 'Nic-Cin', 'Naren']), 'Nic-Cin \u00d72, Naren');
+  assert.equal(sharedByLabel(['Naren']), 'Naren');
+  assert.equal(sharedByLabel([]), '');
+  assert.equal(sharedByLabel(undefined), '');
+  assert.equal(shareLabel({ sharedBy: 1, took: 1 }), ''); // nobody else on it: no note at all
 }
 
 // 2b. Discount: flat per head, reconciles, capped at the bill.
@@ -322,7 +359,8 @@ assert.deepEqual(roundToSum([1142.5, 1142.5], 2285), [1143, 1142]);
   for (const line of ['Subtotal 255.000', 'Service Charge 12.750', 'PPN 11% 29.453', 'Pajak 1.000',
                       'Diskon 40.500', 'Pembulatan 500', 'TOTAL 256.703', 'Tunai 300.000',
                       'Kembali 43.297', 'Kartu Debit 256.703', 'QRIS 256.703',
-                      'Tanggal 29/07/2026', 'Meja 7', 'NPWP 12.345.678.9', 'www.kopothai.co.id']) {
+                      'Tanggal 29/07/2026', 'Meja 7', 'NPWP 12.345.678.9', 'www.kopothai.co.id',
+                      'Receipt No.  #2-6246', '13 Items          Rp 113.000', 'Pax 6']) {
     assert.deepEqual(parseReceipt(line).items, [], `must not read "${line}" as an item`);
   }
   // Amount shapes, and numbers that aren't money.
@@ -330,15 +368,116 @@ assert.deepEqual(roundToSum([1142.5, 1142.5], 2285), [1143, 1142]);
   assert.deepEqual(parseReceipt('Nasi Goreng 59.000,00').items, [{ name: 'Nasi Goreng', amount: 59000 }]);
   assert.deepEqual(parseReceipt('Nasi Goreng 59,000').items, [{ name: 'Nasi Goreng', amount: 59000 }]);
   assert.deepEqual(parseReceipt('Nasi Goreng 1.234.567').items, [{ name: 'Nasi Goreng', amount: 1234567 }]);
-  assert.deepEqual(parseReceipt('Kerupuk 590').items, [{ name: 'Kerupuk', amount: 590 }]);
+  assert.deepEqual(parseReceipt('Kerupuk 590').items, []); // under a thousand rupiah: OCR debris, not a price
   // a size in the name is part of the name; only a trailing price column is dropped
   assert.deepEqual(parseReceipt('Sprite 500ml 12.000').items, [{ name: 'Sprite 500ml', amount: 12000 }]);
   assert.deepEqual(parseReceipt('Es Teh 50').items, []);  // too small to be a price
+  assert.deepEqual(parseReceipt('Oma Elly 081269705603').items, []); // a phone number is not a price
   assert.deepEqual(parseReceipt('2 x 5.000').items, []);  // no name, so not an item
   assert.deepEqual(parseReceipt('18:04').items, []);
   assert.deepEqual(parseReceipt('').items, []);
   assert.deepEqual(parseReceipt(null).items, []);
   assert.equal(parseReceipt('Nasi Goreng 59.000').total, null); // no printed total to check against
+}
+
+// 4f-2. What Tesseract really returns for a struk photographed in someone's hand:
+// the background leaves debris on every line and the dish names come out battered.
+// Prices are the part that has to survive — and nothing that isn't a dish may get
+// through, because a phantom line quietly inflates what everybody owes.
+{
+  const { items } = parseReceipt(`
+    = 081269705603
+    . Receipt No.  #2-6246
+    DINE IN
+    Table D4
+    Order Date 29/08/2026 13:17:19 ll
+    1 WAGYU CARBONARA FETTUCCINE 165.000
+    Vases =| ICE TEA 35.000
+    ii 1 STRAWBERRY 50.000
+    ' 1 COFFEE OMA 75.000
+    1 4 LYCHEE ICE TEA 220.000
+    1 LASAGNA AL FORNO 135.000
+    \\ + TUNA AGLIO OLIO 150.000
+    y\' 1 VANILLA LATTE 65.000
+    13 Items R
+    service charge Rp 1 243 08
+    A, Toe RD 305
+  `);
+  assert.deepEqual(items.map((i) => i.amount), [165000, 35000, 50000, 75000, 220000, 135000, 150000, 65000]);
+  assert.equal(items[0].name, 'WAGYU CARBONARA FETTUCCINE');
+  assert.equal(items[4].name, '4 LYCHEE ICE TEA'); // the qty that explains a 220.000 line survives
+}
+
+// 4f-3. The charges, once OCR has chewed the labels off them. Reading any of
+// these as a dish adds money nobody ordered, so the foot of the struk ends the
+// list outright rather than relying on recognising each label.
+{
+  const { items } = parseReceipt(`
+    1 TRUFFLE PIZZA 140.000
+    (pUASSICHIRAICRERRE 9.000
+    13 Items R
+    vice Charg® R 113.000
+    Shiota! Pal 1.243.000
+    PB | Rp 124.300
+    TOTAL Rp 1.367.300
+  `);
+  assert.deepEqual(items, [
+    { name: 'TRUFFLE PIZZA', amount: 140000 },
+    { name: '(pUASSICHIRAICRERRE', amount: 9000 }, // a battered name is still a dish
+  ]);
+  // Header lines look like non-items too, but they must not end the list early.
+  assert.equal(parseReceipt('Meja 7\nNasi Goreng 59.000').items.length, 1);
+  assert.equal(parseReceipt('Total Items 3\nNasi Goreng 59.000').items.length, 1);
+}
+
+// 4h. What Gemini hands back. It reads the struk far better than Tesseract, but
+// it is still untrusted input deciding what everybody pays, so the shape, the
+// range and the characters all get checked before any of it becomes an item.
+{
+  // The real reply for the Oma Elly struk: all ten lines, quantities included.
+  const { items, total } = parseGemini({
+    items: [
+      { qty: 1, name: 'WAGYU CARBONARA FETTUCCINE', amount: 165000 },
+      { qty: 1, name: 'ICE TEA', amount: 35000 },
+      { qty: 4, name: 'LYCHEE ICE TEA', amount: 220000 },
+    ],
+    subtotal: 1243000, service: 113000, tax: 124300, total: 1367300,
+  });
+  assert.deepEqual(items, [
+    { name: 'WAGYU CARBONARA FETTUCCINE', amount: 165000 }, // a lone qty says nothing
+    { name: 'ICE TEA', amount: 35000 },
+    { name: '4x LYCHEE ICE TEA', amount: 220000 },          // four teas, four shares to tag
+  ]);
+  assert.equal(total, 1367300);
+
+  // Nothing outside the range a struk line can hold gets through.
+  const junk = parseGemini({ items: [
+    { qty: 1, name: 'Free refill', amount: 0 },
+    { qty: 1, name: 'Negative', amount: -50000 },
+    { qty: 1, name: 'Coins', amount: 590 },
+    { qty: 1, name: 'Phone number', amount: 81269705603 },
+    { qty: 1, name: 'Not a number', amount: 'lots' },
+    { qty: 1, name: '   ', amount: 50000 },       // no name, so not an item
+    { qty: 1, amount: 50000 },                    // no name at all
+    { qty: 1, name: 'Rounded', amount: 12345.6 }, // whole rupiah only
+  ] });
+  assert.deepEqual(junk.items, [{ name: 'Rounded', amount: 12346 }]);
+  assert.equal(junk.total, null);
+
+  // A name is text, not a payload: control characters would come straight back
+  // out in a WhatsApp message, and the length is capped.
+  assert.equal(parseGemini({ items: [{ qty: 1, name: 'Es\u0000Teh\nManis', amount: 5000 }] }).items[0].name, 'Es Teh Manis');
+  assert.equal(parseGemini({ items: [{ qty: 1, name: 'x'.repeat(500), amount: 5000 }] }).items[0].name.length, 120);
+  // An absurd quantity is ignored rather than trusted into the name.
+  assert.equal(parseGemini({ items: [{ qty: 100000, name: 'Teh', amount: 5000 }] }).items[0].name, 'Teh');
+  assert.equal(parseGemini({ items: [{ qty: 0, name: 'Teh', amount: 5000 }] }).items[0].name, 'Teh');
+
+  // Anything that isn't the expected shape yields nothing, never a throw.
+  for (const bad of [null, undefined, {}, { items: null }, { items: 'nope' }, { items: [null, 7, 'x'] }]) {
+    assert.deepEqual(parseGemini(bad), { items: [], total: null }, `must survive ${JSON.stringify(bad)}`);
+  }
+  // A reply longer than any real struk is truncated rather than pasted in whole.
+  assert.equal(parseGemini({ items: Array(900).fill({ qty: 1, name: 'Teh', amount: 5000 }) }).items.length, 200);
 }
 
 // 4g. The spreadsheet export: whole rupiah as bare numbers so the sheet adds up,

@@ -4,13 +4,13 @@ Split a restaurant bill by item, then send each person their share on WhatsApp.
 
 **Live:** https://nicholaslie90.github.io/split-bill/
 
-- Tag who shared each item — nobody pays for what they didn't order.
+- Tag who shared each item — nobody pays for what they didn't order. Tap a name again to buy them another share of the line: two of the four lychee teas is two taps, and they pay for two.
 - Service charge and tax as a percentage, a flat rupiah amount, or both — allocated in proportion to each person's subtotal.
 - Discount the same way — but split evenly per head, since a voucher is worth the same to everyone. Capped at the bill total.
 - Optionally round the total down to the nearest 100, 500 or 1.000 ("pembulatan"), so nobody hands over coins.
 - Amounts group themselves as you type — `59000` becomes `59.000` — with dots or commas to taste. The preference follows through to the summary, the PDF and the WhatsApp message.
 - Each person's total is the plain half-up rounding of what they actually owe — `.5` and up goes up, below stays put — and the shares still add up to the bill exactly. Where arithmetic makes both impossible (two shares of exactly `.5`), one person gives a single rupiah rather than the bill going out by one.
-- **📷 Scan a receipt** fills in the item lines from the struk — photograph it with the camera right in the page, or pick a photo you already have. See the caveat below: it is best effort.
+- **📷 Scan a receipt** fills in the item lines from the struk — photograph it with the camera right in the page, or pick a photo you already have. Reads on your device by default; add a Gemini key for a near-perfect read at the cost of sending the photo. See the caveat below.
 - **PDF** of the whole bill: on a phone the share sheet hands it straight to WhatsApp; on desktop it downloads.
 - **Excel** of the same bill, for keeping your own history offline: a CSV with the items, the charges and a row per person, amounts as bare numbers so the columns add up. Opens in Excel, Numbers and Sheets, and stays readable in a text editor.
 - **▸ WhatsApp** per person: opens WhatsApp with their itemised share prefilled. Add their phone number to go straight to the chat, or leave it blank and pick the contact in WhatsApp.
@@ -36,18 +36,33 @@ node test.mjs                 # prints "ok"
 
 ## Scanning a receipt — best effort
 
-The scan is a **starting point, not an answer**. A struk is thermal-printed, creased and often photographed at an angle, so expect to fix names and check numbers. What it does:
+The scan is a **starting point, not an answer**. A struk is thermal-printed, creased and often photographed at an angle, so check the numbers either way. There are two readers, and which one runs depends on whether you have put a key in the box.
 
 - Opens the camera in the page (`getUserMedia`, back camera where there is one) with a live preview, and grabs a single frame when you press **Take photo**. The stream is stopped the moment the sheet closes. No camera, no permission, or an insecure origin → it falls back to picking a photo, which reads exactly the same way.
-- Reads the photo in your browser with [Tesseract.js](https://github.com/naptha/tesseract.js) — Indonesian language data, and the image is never uploaded anywhere.
-- Takes the rightmost amount on a line as that line's total (so a unit-price column is ignored) and the text before it as the name, keeping a quantity when it's more than one.
-- **Skips charge lines on purpose** — subtotal, service, PPN, discount, rounding, cash, change. Those belong to the app's own fields, so a misread can never quietly double-charge anybody. It shows the printed total when it finds one, purely as a cross-check.
+- Whichever reader runs, the photo is greyed and cut to 1600px first. A raw 12 MP photo reads as noise.
 - Scanned items are **added** to whatever is already there, never replacing it, and are ordinary editable rows.
-- First scan downloads the engine and language data (~4 MB) and the browser caches it. Nothing loads until you press the button.
+
+### On your phone, by default
+
+[Tesseract.js](https://github.com/naptha/tesseract.js) with Indonesian and English data, in single-column mode. **Nothing is uploaded.** On the test struk it reads eight of the ten lines and mangles two, in about 16 seconds.
+
+- Takes the rightmost amount on a line as that line's total (so a unit-price column is ignored) and the text before it as the name, keeping a quantity when it's more than one.
+- **Stops at the charges** — subtotal, service, PPN, discount, rounding, cash, change. Those belong to the app's own fields, so a misread can never quietly double-charge anybody. It shows the printed total when it finds one, purely as a cross-check.
+- First scan downloads the engine and language data (~8 MB) and the browser caches it. Nothing loads until you press the button.
+
+### With a Gemini key
+
+Paste a [Gemini API key](https://aistudio.google.com/apikey) into the box under the scan button and the photo goes to `gemini-3.5-flash-lite` instead. On the test struk it reads **all ten lines exactly**, quantities included, in about 3 seconds.
+
+- **The photo leaves your device** when a key is set — that is the whole trade, and the note under the button says so while the key is there. Nothing else about the bill is ever sent.
+- The key is kept in `localStorage` on that device alone. It is never part of the bill, so **Start over** does not clear it and no CSV, PDF or WhatsApp message carries it. **Clear** removes it, and an empty box puts you back on Tesseract.
+- Never commit a key to this repo. It is public and GitHub Pages serves the source verbatim, so a key in the source is a key published to the world — and Google scans public repos and disables what it finds. The box exists precisely so the key stays off the server.
+- The reply is schema-constrained JSON and is still validated before anything becomes an item: amounts must be whole rupiah between 1.000 and 100 juta, names are stripped of control characters and capped, and the list is truncated. A model's answer decides what people pay, so it is treated as untrusted input.
 
 ## Notes
 
 - Amounts are whole rupiah. Phone numbers without a country code are assumed Indonesian (`08…` → `+62…`); type `+<code>…` for anywhere else.
 - Tax is charged on subtotal + service charge by default (Indonesian convention) — there's a checkbox to turn that off.
 - [jsPDF](https://github.com/parallax/jsPDF) and [Tesseract.js](https://github.com/naptha/tesseract.js) are loaded from a CDN at pinned versions with SRI hashes — Tesseract only when you first press scan. Tesseract then fetches its own wasm engine and language data, which SRI can't cover. So PDF export and scanning need a connection; everything else works offline.
+- The only thing that ever leaves the device is a receipt photo, and only when you have set a Gemini key. The bill itself — names, amounts, phone numbers — never goes anywhere.
 - The CSV starts with `sep=,` so Excel honours the comma whatever the machine's locale says, and a name beginning with `=`, `+`, `-` or `@` is prefixed with `'` so a spreadsheet can't run it as a formula.

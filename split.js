@@ -20,6 +20,9 @@ export function roundToSum(values, target) {
 }
 
 // bill: { participants: [name], items: [{name, amount, sharedBy: [name]}],
+// `sharedBy` is a tally, not a set: a name listed twice took two of the four
+// lychee teas on that line and pays for two. Its length is the number of shares
+// the line is cut into, which is what makes the arithmetic fall out unchanged.
 //         servicePct, serviceAmt, taxPct, taxAmt, taxOnService, discount, discountPct, roundTo }
 // Service, tax and discount each take a percentage, a flat rupiah amount, or both.
 export function calcShares(bill) {
@@ -36,10 +39,12 @@ export function calcShares(bill) {
     const tagged = (it.sharedBy?.length ? it.sharedBy : people).filter((p) => people.includes(p));
     if (!tagged.length) continue; // item tagged only to people who were since removed
     const each = amount / tagged.length;
-    for (const p of tagged) {
-      const i = people.indexOf(p);
-      weights[i] += each;
-      lines[i].push({ name: it.name, share: each, sharedBy: tagged.length });
+    // One line per person per item, however many shares they took — two entries
+    // of 55.000 for the same tea is a receipt to argue with, not to read.
+    for (const p of new Set(tagged)) {
+      const took = tagged.filter((x) => x === p).length;
+      lines[people.indexOf(p)].push({ name: it.name, share: each * took, sharedBy: tagged.length, took });
+      weights[people.indexOf(p)] += each * took;
     }
   }
 
@@ -104,6 +109,18 @@ export function calcShares(bill) {
   };
 }
 
+// "Nic-Cin x2, Naren" — the tally read out. Printing a name once per share
+// reads as a stutter, and on a four-way line it doesn't fit.
+export function sharedByLabel(sharedBy) {
+  const tally = new Map();
+  for (const p of sharedBy ?? []) tally.set(p, (tally.get(p) ?? 0) + 1);
+  return [...tally].map(([p, n]) => (n > 1 ? `${p} \u00d7${n}` : p)).join(', ');
+}
+
+// How a person's slice of one item reads: "2 of 4" — their shares out of the
+// line's. Empty when nobody else was on the item, so it says nothing then.
+export const shareLabel = (line) => (line.sharedBy > 1 ? `${line.took ?? 1} of ${line.sharedBy}` : '');
+
 // The other side of the ledger for whoever fronted the bill ("nalangin"): who
 // owes them, and how much they should get back. Their own share stays theirs, so
 // `due` plus their own total is always the bill total. People who owe nothing are
@@ -121,9 +138,15 @@ export function collect(result, payer) {
 // service, cash, change — which the app charges through its own fields, so a
 // misread there can't quietly double-charge anybody. Whatever it gets wrong the
 // user edits; whatever it misses they type.
-const NOT_AN_ITEM = /(sub\s*)?total|tunai|cash|kembali|change|ppn|pb\s*1|pajak|tax|servi|diskon|discount|voucher|pembulatan|rounding|bayar|payment|kartu|card|debit|kredit|credit|qris|npwp|terima\s*kasih|thank|kasir|cashier|struk|invoice|meja|table|tanggal|date|jam|time|www\.|@/i;
-// 59.000 | 59,000 | 1.234.567 | 59000 — with an optional two-decimal tail.
-const MONEY = String.raw`\d{1,3}(?:[.,]\d{3})+(?:[.,]\d{2})?|\d{3,}(?:[.,]\d{2})?`;
+// The summary block at the foot of the struk. Narrower than NOT_AN_ITEM on
+// purpose: "Meja 7" is not an item either, but it's printed in the header and
+// must not stop the reading before it starts.
+const END_OF_ITEMS = /(sub\s*)?total|servi|charg|ppn|pb\s*[1li|]|pajak|tax|diskon|discount|voucher|pembulatan|rounding|tunai|cash|kembali|change|\d+\s*(items|barang|qty)\b/i;
+const NOT_AN_ITEM = /(sub\s*)?total|tunai|cash|kembali|change|ppn|pb\s*1|pajak|tax|servi|diskon|discount|voucher|pembulatan|rounding|bayar|payment|kartu|card|debit|kredit|credit|qris|npwp|terima\s*kasih|thank|kasir|cashier|struk|\bnota\b|receipt|invoice|meja|table|tanggal|date|\d{1,2}\s*[/-]\s*\d{1,2}\s*[/-]|jam|time|\bpax\b|\d+\s*(items|barang|qty)\b|www\.|@/i;
+// 59.000 | 59,000 | 1.234.567 | 59000 — with an optional two-decimal tail. The
+// space around the separator is OCR's, not the printer's: "165 .000" is one
+// number that a crease broke in half, and dropping it loses a whole item line.
+const MONEY = String.raw`\d{1,3}(?:\s?[.,]\s?\d{3})+(?:[.,]\d{2})?|\d{3,}(?:[.,]\d{2})?`;
 const MONEY_ON_LINE = new RegExp(MONEY, 'g');
 // A price sitting at the end of what's left of the name is the unit-price column
 // ("2 x Es Teh  5.000  10.000"), not part of what the thing is called.
@@ -139,13 +162,24 @@ const asRupiah = (s) => {
 export function parseReceipt(text) {
   const items = [];
   let total = null;
+  let done = false; // past the last dish, into the charges
   for (const raw of String(text ?? '').split('\n')) {
     const line = raw.trim();
+    // Every struk prints its dishes first and its charges after, so the first
+    // charge line ends the list. Matching each charge by name isn't enough on
+    // its own — OCR turns "Service Charge" into "vice Charg®" and "Subtotal"
+    // into "Shiota! Pal", and a charge that slips through as an item inflates
+    // what everybody owes. One dish has to have been found first, so header
+    // noise that happens to read as "total" can't swallow the whole receipt.
+    done ||= items.length > 0 && END_OF_ITEMS.test(line);
     const found = line.match(MONEY_ON_LINE);
     if (!found) continue;
     const amount = asRupiah(found[found.length - 1]); // unit price then line total: the line total wins
-    if (amount < 100) continue; // qty, table number, a year — not money
-    if (NOT_AN_ITEM.test(line)) {
+    // Nothing on a struk costs less than a thousand rupiah, and nothing costs a
+    // hundred million: below is a table number or the tail of a misread line,
+    // above is the shop's phone number read as one long figure.
+    if (amount < 1000 || amount > 100_000_000) continue;
+    if (done || NOT_AN_ITEM.test(line)) {
       // The printed total is worth keeping as a cross-check, even though it's
       // not an item. Receipts print SUBTOTAL, then TOTAL, then what was paid.
       if (/\btotals?\b/i.test(line) && !/sub\s*total/i.test(line)) total = amount;
@@ -163,6 +197,36 @@ export function parseReceipt(text) {
     items.push({ name, amount });
   }
   return { items, total };
+}
+
+// --- receipt photo -> Gemini -> draft item lines ------------------------------
+// A model reads a creased struk far better than Tesseract does, but its answer
+// is untrusted input like any other: it decides what everybody pays, so nothing
+// goes through unchecked. Same shape out as parseReceipt, so the rest of the
+// scan doesn't care which of the two read the photo.
+const MAX_ITEMS = 200;      // a struk this long is a catering invoice
+const MAX_NAME = 120;
+
+const asAmount = (v) => {
+  const n = Math.round(Number(v));
+  return Number.isFinite(n) && n >= 1000 && n <= 100_000_000 ? n : null;
+};
+
+export function parseGemini(data) {
+  const items = [];
+  for (const raw of (Array.isArray(data?.items) ? data.items : []).slice(0, MAX_ITEMS)) {
+    const amount = asAmount(raw?.amount);
+    if (amount === null) continue;
+    // Control characters would come straight back out in a WhatsApp message.
+    const name = String(raw?.name ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, MAX_NAME);
+    if (!name) continue;
+    // Quantity leads the name the same way it does on the struk, and the same
+    // way parseReceipt writes it — a lone "1" says nothing, "4x" explains the
+    // amount and tells you how many shares the line is worth splitting into.
+    const qty = Math.round(Number(raw?.qty));
+    items.push({ name: Number.isFinite(qty) && qty > 1 && qty <= 999 ? `${qty}x ${name}` : name, amount });
+  }
+  return { items, total: asAmount(data?.total) };
 }
 
 // --- the bill as a spreadsheet ----------------------------------------------
@@ -187,7 +251,7 @@ export function toCsv(bill, result) {
     ['Item', 'Amount', 'Shared by'],
     ...(bill.items ?? []).map((it) => [
       it.name || 'Item', Number(it.amount) || 0,
-      it.sharedBy?.length ? it.sharedBy.join(', ') : 'everyone',
+      it.sharedBy?.length ? sharedByLabel(it.sharedBy) : 'everyone',
     ]),
     [],
     ['Subtotal', result.subtotal],

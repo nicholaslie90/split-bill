@@ -243,7 +243,18 @@
         <button id="camClose">Cancel</button>
       </div>
     </dialog>
-    <p class="hint" id="scanNote" style="margin-top:8px" aria-live="polite">Photograph the struk with your camera, or pick a photo you already have. Scanning is best effort — a struk is read roughly, so check every name and amount afterwards. Service, tax and discount you still enter yourself. Nothing is uploaded: the photo and the reading both stay in your browser.</p>
+    <p class="hint" id="scanNote" style="margin-top:8px" aria-live="polite"></p>
+    <!-- Optional, and the only thing on this page that ever leaves the device.
+         Kept out of the bill so "Start over" and the exports can't carry it. -->
+    <div style="margin-top:10px">
+      <label for="geminiKey">Gemini API key (optional)</label>
+      <div class="row">
+        <input id="geminiKey" type="password" autocomplete="off" spellcheck="false"
+               style="flex:1 1 auto" placeholder="Leave blank to read on this device">
+        <button id="geminiClear" style="flex:0 0 auto">Clear</button>
+      </div>
+      <p class="hint" style="margin-top:6px">Kept on this device only, never in the bill or any export. With a key the photo goes to Google to be read, and comes back near-perfect; without one it is read on your phone and nothing leaves it.</p>
+    </div>
   </section>
 
   <section>
@@ -316,7 +327,7 @@
 // The ?v= is not decoration: this page and split.js are cached separately, so a
 // browser holding yesterday's split.js while loading today's page would fail to
 // import and leave every button dead. Bump it whenever split.js gains an export.
-import { calcShares, collect, digits, fmtDate, group, money, parseReceipt, setMoneySeparator, toCsv, waLink } from './split.js?v=2';
+import { calcShares, collect, digits, fmtDate, group, money, parseGemini, parseReceipt, setMoneySeparator, shareLabel, sharedByLabel, toCsv, waLink } from './split.js?v=5';
 
 const KEY = 'split-bill';
 const $ = (id) => document.getElementById(id);
@@ -541,10 +552,21 @@ function renderItems() {
         chips.append(chip);
       };
       tag('Everyone', !item.sharedBy.length, () => { item.sharedBy = []; });
+      // Tapping a chip again buys another share of the line rather than undoing
+      // the first — "Nic-Cin had two of the four lychee teas" is four taps, no
+      // new control, and one more tap takes them back off it.
+      // ponytail: the cycle wraps at the head count (three at the least), which
+      // covers every struk line I've seen carry a quantity. Somebody who needs
+      // more shares than there are people at the table wants two item rows.
+      const most = Math.max(3, bill.participants.length);
       for (const p of bill.participants) {
-        const on = item.sharedBy.includes(p);
-        tag(p, on, () => {
-          item.sharedBy = on ? item.sharedBy.filter((x) => x !== p) : [...item.sharedBy, p];
+        const took = item.sharedBy.filter((x) => x === p).length;
+        tag(took > 1 ? `${p} \u00d7${took}` : p, took > 0, () => {
+          const next = took >= most ? 0 : took + 1;
+          // Rebuilt in participant order, so the tally reads the same whichever
+          // order the chips were tapped in.
+          item.sharedBy = bill.participants.flatMap((q) =>
+            Array((q === p ? next : item.sharedBy.filter((x) => x === q).length)).fill(q));
         });
       }
     };
@@ -564,9 +586,10 @@ $('addItem').onclick = () => {
 
 // --- scanning a receipt -----------------------------------------------------
 // Tesseract runs entirely in the page — the photo is never uploaded anywhere.
-// The library is ~60 KB but pulls its wasm engine and the Indonesian language
-// data (~4 MB) on first use, so none of it loads until you actually scan, and
-// the browser caches it for next time.
+// The library is ~60 KB but pulls its wasm engine and the language data (~8 MB)
+// on first use, so none of it loads until you actually scan, and the browser
+// caches it for next time. Indonesian *and* English: the headings on a struk are
+// Indonesian, the dishes on it usually aren't ("WAGYU CARBONARA FETTUCCINE").
 const OCR_SRC = 'https://cdn.jsdelivr.net/npm/tesseract.js@6.0.1/dist/tesseract.min.js';
 const OCR_SRI = 'sha384-r1ru3tcf6FhnCFR4B7pIFG+BhFF9LlFtz/P1y4pblWn3AGs9y3lBx5SKLNf4+rED';
 let ocr; // the pending or resolved Tesseract namespace
@@ -580,7 +603,124 @@ const loadOcr = () => (ocr ??= new Promise((ok, fail) => {
 }));
 
 const note = (text) => { $('scanNote').textContent = text; };
-const KEEP = $('scanNote').textContent; // the standing best-effort caveat
+const progress = (m) => { if (m.status === 'recognizing text') note(`Reading the receipt… ${Math.round(m.progress * 100)}%`); };
+
+// One worker, kept alive, so scanning a second struk doesn't reload the engine.
+let worker;
+const getWorker = () => (worker ??= loadOcr().then(async (T) => {
+  const w = await T.createWorker('ind+eng', T.OEM.LSTM_ONLY, { logger: progress });
+  // One column, which is what a struk is. This is the setting that decides
+  // whether a price stays with its dish: the default hunts for a page layout in
+  // the tiled floor behind the paper, and treating the whole photo as one rigid
+  // block of text (mode 6) reads a curled struk a row out of step, so every
+  // dish comes back holding the next dish's price — right names, wrong money.
+  await w.setParameters({ tessedit_pageseg_mode: T.PSM.SINGLE_COLUMN });
+  return w;
+}).catch((e) => { worker = null; throw e; })); // let the next scan retry
+
+// Grey and cut down to 1600px before Tesseract ever sees it. A raw 12 MP phone
+// photo of a struk reads as noise — on the test receipt it produced no item
+// lines at all; the same photo through this produces most of them. The S-curve
+// is what lifts thermal ink off paper a hand is shadowing: a plain linear
+// contrast bump clips the faint strokes away and measured worse.
+const OCR_WIDTH = 1600;
+const sCurve = (x) => { const f = (t) => 1 / (1 + Math.exp(8 * (0.5 - t))); return (f(x) - f(0)) / (f(1) - f(0)); };
+const INK = Uint8Array.from({ length: 256 }, (_, i) => Math.round(255 * sCurve(i / 255)));
+
+async function prepare(file, ink = true) {
+  const img = await createImageBitmap(file);
+  const scale = Math.min(1, OCR_WIDTH / img.width);
+  const c = el('canvas', { width: Math.round(img.width * scale), height: Math.round(img.height * scale) });
+  const ctx = c.getContext('2d', { willReadFrequently: true });
+  ctx.filter = ink ? 'grayscale(1)' : 'none';
+  ctx.drawImage(img, 0, 0, c.width, c.height);
+  ctx.filter = 'none';
+  img.close();
+  if (!ink) return c; // a model reads the photograph; only Tesseract needs it flattened
+  const px = ctx.getImageData(0, 0, c.width, c.height);
+  for (let i = 0; i < px.data.length; i += 4) px.data[i] = px.data[i + 1] = px.data[i + 2] = INK[px.data[i]];
+  ctx.putImageData(px, 0, 0);
+  return c;
+}
+
+// --- reading the struk with Gemini instead -----------------------------------
+// A model reads a creased struk far better than Tesseract can: on the test
+// receipt Tesseract gets eight of the ten lines and quietly mangles two, Gemini
+// gets all ten and the quantities with them. It costs a round trip and, more to
+// the point, the photo leaves the phone — so it is off unless you supply a key.
+//
+// The key lives in its own storage slot, never in `bill`: otherwise "Start
+// over" would wipe it, and every CSV, PDF and WhatsApp message would carry it.
+const KEY_SLOT = 'split-bill-gemini-key';
+const geminiKey = () => (localStorage.getItem(KEY_SLOT) || '').trim();
+
+// The standing caveat is not standing any more — with a key the photo leaves
+// the device, and saying otherwise on the one screen where it matters would be
+// a lie. Built fresh each time rather than snapshotted at load.
+const KEEP = () => [
+  'Scanning is best effort, so check every name and amount afterwards.',
+  'Service, tax and discount you still enter yourself.',
+  geminiKey()
+    ? 'The photo is sent to Google Gemini to be read; nothing else about the bill is.'
+    : 'Nothing is uploaded: the photo and the reading both stay in your browser.',
+].join(' ');
+const idle = () => note(`Photograph the struk with your camera, or pick a photo you already have. ${KEEP()}`);
+
+$('geminiKey').value = geminiKey();
+$('geminiKey').oninput = () => {
+  const v = $('geminiKey').value.trim();
+  if (v) localStorage.setItem(KEY_SLOT, v); else localStorage.removeItem(KEY_SLOT);
+  idle(); // the privacy line flips the moment the field does
+};
+$('geminiClear').onclick = () => { $('geminiKey').value = ''; localStorage.removeItem(KEY_SLOT); idle(); };
+idle();
+
+// Flash Lite reads a struk as well as the bigger models here and answers in two
+// seconds rather than fifteen. responseSchema is what keeps the reply to the
+// shape parseGemini expects, instead of prose with some JSON inside it.
+const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent';
+const GEMINI_ASK = 'Read this Indonesian restaurant receipt (struk). Return every ordered line item exactly as printed, with its quantity and its line total in whole rupiah. Do not return service charge, tax, subtotal or total as items.';
+const AMOUNT = { type: 'integer' };
+const GEMINI_CONFIG = {
+  temperature: 0,
+  responseMimeType: 'application/json',
+  responseSchema: {
+    type: 'object',
+    properties: {
+      items: { type: 'array', items: { type: 'object',
+        properties: { qty: { type: 'integer' }, name: { type: 'string' }, amount: AMOUNT },
+        required: ['qty', 'name', 'amount'] } },
+      total: AMOUNT,
+    },
+    required: ['items'],
+  },
+};
+
+async function readWithGemini(file) {
+  note('Sending the photo to Gemini…');
+  const shot = await prepare(file, false); // colour and unflattened: the model wants the photograph
+  const res = await fetch(GEMINI_URL, {
+    method: 'POST',
+    // A header, never a query string — a key in a URL ends up in logs and history.
+    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': geminiKey() },
+    body: JSON.stringify({
+      generationConfig: GEMINI_CONFIG,
+      contents: [{ parts: [
+        { text: GEMINI_ASK },
+        { inline_data: { mime_type: 'image/jpeg', data: shot.toDataURL('image/jpeg', 0.85).split(',')[1] } },
+      ] }],
+    }),
+  });
+  if (!res.ok) {
+    // Google's reason is worth showing; the key is never echoed back in it.
+    const why = await res.json().catch(() => null);
+    throw new Error(`Gemini refused (${res.status}). ${why?.error?.message ?? 'Check the key.'}`);
+  }
+  const body = await res.json();
+  const text = body?.candidates?.[0]?.content?.parts?.map((x) => x.text).filter(Boolean).join('') ?? '';
+  try { return parseGemini(JSON.parse(text)); }
+  catch { throw new Error('Gemini sent back something that was not a receipt.'); }
+}
 
 // Two ways in — the camera or a photo already on the device — and one pipeline
 // out, so a scan behaves the same whichever way the picture arrived.
@@ -612,7 +752,7 @@ $('scan').onclick = async () => {
       video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 } },
     });
   } catch {
-    note(`Couldn't open the camera — pick a photo instead. ${KEEP}`);
+    note(`Couldn't open the camera — pick a photo instead. ${KEEP()}`);
     return $('shot').click();
   }
   feed.srcObject = stream;
@@ -638,20 +778,24 @@ $('shot').onchange = () => {
   if (file) scanFile(file);
 };
 
+// Tesseract, on this device. Still the whole story when there's no key, and
+// still what the app falls back to if a scan is refused.
+async function readHere(file) {
+  note('Loading the scanner — a one-time download of about 8 MB…');
+  const [w, image] = await Promise.all([getWorker(), prepare(file)]);
+  // ponytail: one pass, one page-segmentation mode. A curled struk can still
+  // hand a row's price to the dish above it; reading the word boxes and
+  // re-pairing the two columns by position would fix that, if it proves common.
+  const { data } = await w.recognize(image);
+  return parseReceipt(data.text);
+}
+
 async function scanFile(file) {
   $('scan').disabled = true;
-  note('Loading the scanner — a one-time download of about 4 MB…');
   try {
-    const T = await loadOcr();
-    // ponytail: the photo goes to Tesseract at whatever size the camera made it.
-    // Recognition runs in a worker so the page stays responsive; if a 12 MP photo
-    // proves too slow on older phones, downscale to ~1500px wide on a canvas first.
-    const { data } = await T.recognize(file, 'ind', {
-      logger: (m) => { if (m.status === 'recognizing text') note(`Reading the receipt… ${Math.round(m.progress * 100)}%`); },
-    });
-    const { items, total } = parseReceipt(data.text);
+    const { items, total } = await (geminiKey() ? readWithGemini(file) : readHere(file));
     if (!items.length) {
-      note(`Couldn't make out any item lines — add them by hand. ${KEEP}`);
+      note(`Couldn't make out any item lines — add them by hand. ${KEEP()}`);
       return;
     }
     // Append, never replace: a bad scan must not wipe out what's already typed.
@@ -661,10 +805,10 @@ async function scanFile(file) {
     note([
       `Added ${items.length} item${items.length > 1 ? 's' : ''}, Rp ${money(read)} in total.`,
       total ? `The struk says its total is Rp ${money(total)} — service, tax and discount make up the difference.` : '',
-      KEEP,
+      KEEP(),
     ].filter(Boolean).join(' '));
   } catch (e) {
-    note(`${e.message} ${KEEP}`);
+    note(`${e.message} ${KEEP()}`);
   } finally {
     $('scan').disabled = false;
   }
@@ -699,7 +843,7 @@ function messageFor(p) {
       '', `Your own share: Rp ${money(p.total)}`,
     ].join('\n');
   }
-  const lines = p.lines.map((l) => `• ${l.name || 'Item'} — Rp ${money(l.share)}${l.sharedBy > 1 ? ` (split ${l.sharedBy})` : ''}`);
+  const lines = p.lines.map((l) => `• ${l.name || 'Item'} — Rp ${money(l.share)}${shareLabel(l) ? ` (${shareLabel(l)})` : ''}`);
   const extras = [
     p.service ? `Service: Rp ${money(p.service)}` : null,
     p.tax ? `Tax: Rp ${money(p.tax)}` : null,
@@ -729,7 +873,7 @@ function renderSummary() {
     if (payer) left.append(el('span', { className: 'hint', textContent: ' · paid up front' }));
     if (p.lines.length) {
       left.append(el('ul', {}, p.lines.map((l) =>
-        el('li', { textContent: `${l.name || 'Item'} — ${money(l.share)}${l.sharedBy > 1 ? ` (÷${l.sharedBy})` : ''}` }))));
+        el('li', { textContent: `${l.name || 'Item'} — ${money(l.share)}${shareLabel(l) ? ` (${shareLabel(l)})` : ''}` }))));
     }
     const wa = el('button', {
       className: 'wa', textContent: bill.phones[p.name] ? '▸ WhatsApp' : '▸ WhatsApp…',
@@ -778,7 +922,7 @@ function buildPdf() {
 
   line('ITEMS', null, { size: 9, bold: true, gap: 16 });
   for (const it of bill.items) {
-    const who = it.sharedBy.length ? it.sharedBy.join(', ') : 'everyone';
+    const who = it.sharedBy.length ? sharedByLabel(it.sharedBy) : 'everyone';
     line(`${it.name || 'Item'}  —  ${who}`, `Rp ${money(Number(it.amount) || 0)}`);
   }
   rule();
@@ -796,7 +940,7 @@ function buildPdf() {
   for (const p of result.people) {
     line(`${p.name}${p.name === bill.paidBy ? ' (paid up front)' : ''}`, `Rp ${money(p.total)}`, { size: 11, bold: true });
     for (const l of p.lines) {
-      line(`${l.name || 'Item'}${l.sharedBy > 1 ? ` (split ${l.sharedBy})` : ''}`, `Rp ${money(l.share)}`, { size: 9, gap: 13, indent: 12 });
+      line(`${l.name || 'Item'}${shareLabel(l) ? ` (${shareLabel(l)})` : ''}`, `Rp ${money(l.share)}`, { size: 9, gap: 13, indent: 12 });
     }
     if (p.service) line('Service charge', `Rp ${money(p.service)}`, { size: 9, gap: 13, indent: 12 });
     if (p.tax) line('Tax', `Rp ${money(p.tax)}`, { size: 9, gap: 13, indent: 12 });
