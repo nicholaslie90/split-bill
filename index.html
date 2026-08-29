@@ -341,7 +341,7 @@ function el(tag, props = {}, kids = []) {
 
 const blank = () => ({
   title: '', date: new Date().toISOString().slice(0, 10),
-  participants: [], phones: {}, paidBy: '', items: [],
+  participants: [], phones: {}, paidBy: '', items: [], photo: '',
   servicePct: 5, serviceAmt: '', taxPct: 11, taxAmt: '', taxOnService: true,
   discount: '', discountPct: '', roundTo: 0,
   payName: '', payBank: '', payAcct: '',
@@ -367,11 +367,26 @@ bill.items = (Array.isArray(bill.items) ? bill.items : []).map((it) => ({
   sharedBy: Array.isArray(it.sharedBy) ? it.sharedBy.map(String) : [],
 }));
 for (const k of ['serviceAmt', 'taxAmt', 'discount']) bill[k] = rupiah(bill[k]);
+// The struk photo is a data URL out of storage and ends up inside a PDF, so
+// only a JPEG this app could have written itself is allowed through.
+bill.photo = /^data:image\/jpeg;base64,[A-Za-z0-9+/]+=*$/.test(bill.photo) && bill.photo.length < 4e6
+  ? bill.photo : '';
 if (!bill.phones || typeof bill.phones !== 'object') bill.phones = {};
 // Only a current participant can be the one who fronted the bill.
 if (!bill.participants.includes(bill.paidBy)) bill.paidBy = '';
 
-const save = () => localStorage.setItem(KEY, JSON.stringify(bill));
+// Returns false when the struk photo had to be dropped to make the bill fit.
+// Everything else here is a few kilobytes; the photo is the only thing that can
+// ever tip localStorage over, and the numbers matter more than the picture.
+const save = () => {
+  try { localStorage.setItem(KEY, JSON.stringify(bill)); return true; }
+  catch {
+    if (!bill.photo) throw new Error('There is no room left to save this bill.');
+    bill.photo = '';
+    localStorage.setItem(KEY, JSON.stringify(bill));
+    return false;
+  }
+};
 
 // --- money fields -----------------------------------------------------------
 // Amounts are stored as plain digit strings; the separator is display only, so
@@ -618,25 +633,34 @@ const getWorker = () => (worker ??= loadOcr().then(async (T) => {
   return w;
 }).catch((e) => { worker = null; throw e; })); // let the next scan retry
 
-// Grey and cut down to 1600px before Tesseract ever sees it. A raw 12 MP phone
-// photo of a struk reads as noise — on the test receipt it produced no item
-// lines at all; the same photo through this produces most of them. The S-curve
-// is what lifts thermal ink off paper a hand is shadowing: a plain linear
-// contrast bump clips the faint strokes away and measured worse.
-const OCR_WIDTH = 1600;
+// One size for all three jobs. 1600px is enough to read the smallest print on a
+// struk, small enough to sit in localStorage beside the bill, and small enough
+// to post to Gemini — a raw 12 MP photo is none of those things: put that
+// straight into Tesseract and it produced no item lines at all.
+const SHOT_WIDTH = 1600;
+
+async function prepare(file) {
+  const img = await createImageBitmap(file);
+  const scale = Math.min(1, SHOT_WIDTH / img.width);
+  const c = el('canvas', { width: Math.round(img.width * scale), height: Math.round(img.height * scale) });
+  c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+  img.close();
+  return c;
+}
+
+// Grey, then an S-curve through the midpoint. This is what lifts thermal ink
+// off paper a hand is shadowing; a plain linear contrast bump clips the faint
+// strokes away and measured worse. Onto a copy — Gemini and the PDF both want
+// the photograph, and only Tesseract wants it flattened like this.
 const sCurve = (x) => { const f = (t) => 1 / (1 + Math.exp(8 * (0.5 - t))); return (f(x) - f(0)) / (f(1) - f(0)); };
 const INK = Uint8Array.from({ length: 256 }, (_, i) => Math.round(255 * sCurve(i / 255)));
 
-async function prepare(file, ink = true) {
-  const img = await createImageBitmap(file);
-  const scale = Math.min(1, OCR_WIDTH / img.width);
-  const c = el('canvas', { width: Math.round(img.width * scale), height: Math.round(img.height * scale) });
+function flatten(shot) {
+  const c = el('canvas', { width: shot.width, height: shot.height });
   const ctx = c.getContext('2d', { willReadFrequently: true });
-  ctx.filter = ink ? 'grayscale(1)' : 'none';
-  ctx.drawImage(img, 0, 0, c.width, c.height);
+  ctx.filter = 'grayscale(1)';
+  ctx.drawImage(shot, 0, 0);
   ctx.filter = 'none';
-  img.close();
-  if (!ink) return c; // a model reads the photograph; only Tesseract needs it flattened
   const px = ctx.getImageData(0, 0, c.width, c.height);
   for (let i = 0; i < px.data.length; i += 4) px.data[i] = px.data[i + 1] = px.data[i + 2] = INK[px.data[i]];
   ctx.putImageData(px, 0, 0);
@@ -696,9 +720,8 @@ const GEMINI_CONFIG = {
   },
 };
 
-async function readWithGemini(file) {
+async function readWithGemini(shot) {
   note('Sending the photo to Gemini…');
-  const shot = await prepare(file, false); // colour and unflattened: the model wants the photograph
   const res = await fetch(GEMINI_URL, {
     method: 'POST',
     // A header, never a query string — a key in a URL ends up in logs and history.
@@ -780,31 +803,36 @@ $('shot').onchange = () => {
 
 // Tesseract, on this device. Still the whole story when there's no key, and
 // still what the app falls back to if a scan is refused.
-async function readHere(file) {
+async function readHere(shot) {
   note('Loading the scanner — a one-time download of about 8 MB…');
-  const [w, image] = await Promise.all([getWorker(), prepare(file)]);
+  const w = await getWorker();
   // ponytail: one pass, one page-segmentation mode. A curled struk can still
   // hand a row's price to the dish above it; reading the word boxes and
   // re-pairing the two columns by position would fix that, if it proves common.
-  const { data } = await w.recognize(image);
+  const { data } = await w.recognize(flatten(shot));
   return parseReceipt(data.text);
 }
 
 async function scanFile(file) {
   $('scan').disabled = true;
   try {
-    const { items, total } = await (geminiKey() ? readWithGemini(file) : readHere(file));
-    if (!items.length) {
-      note(`Couldn't make out any item lines — add them by hand. ${KEEP()}`);
-      return;
-    }
+    const shot = await prepare(file);
+    const { items, total } = await (geminiKey() ? readWithGemini(shot) : readHere(shot));
+    // The struk goes on the back of the PDF whether or not the reading worked —
+    // if anything, a scan that came back empty is when you most want the paper
+    // attached. One photo, the latest: scanning again replaces it.
+    bill.photo = shot.toDataURL('image/jpeg', 0.8);
     // Append, never replace: a bad scan must not wipe out what's already typed.
     bill.items.push(...items.map((it) => ({ name: it.name, amount: String(it.amount), sharedBy: [] })));
-    save(); renderAll();
+    const kept = save();
+    renderAll();
     const read = items.reduce((a, it) => a + it.amount, 0);
     note([
-      `Added ${items.length} item${items.length > 1 ? 's' : ''}, Rp ${money(read)} in total.`,
+      items.length
+        ? `Added ${items.length} item${items.length > 1 ? 's' : ''}, Rp ${money(read)} in total.`
+        : `Couldn't make out any item lines — add them by hand.`,
       total ? `The struk says its total is Rp ${money(total)} — service, tax and discount make up the difference.` : '',
+      kept ? 'The photo is on the last page of the PDF.' : 'The photo was too big to keep, so the PDF goes without it.',
       KEEP(),
     ].filter(Boolean).join(' '));
   } catch (e) {
@@ -954,6 +982,18 @@ function buildPdf() {
     y += 8;
     line('TRANSFER TO', null, { size: 9, bold: true, gap: 16 });
     for (const l of pay) line(l, null, { size: 11 });
+  }
+
+  // The struk itself, on its own page at the back. Whoever wants to check a
+  // number against the paper can; whoever just wants to know what they owe
+  // doesn't have to scroll past a photograph to find out.
+  if (bill.photo) {
+    doc.addPage();
+    y = 56;
+    line('THE STRUK', null, { size: 9, bold: true, gap: 16 });
+    const { width, height } = doc.getImageProperties(bill.photo);
+    const fit = Math.min((RIGHT - M) / width, (800 - y) / height);
+    doc.addImage(bill.photo, 'JPEG', M, y, width * fit, height * fit);
   }
   return doc;
 }

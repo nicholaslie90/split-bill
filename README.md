@@ -11,7 +11,7 @@ Split a restaurant bill by item, then send each person their share on WhatsApp.
 - Amounts group themselves as you type — `59000` becomes `59.000` — with dots or commas to taste. The preference follows through to the summary, the PDF and the WhatsApp message.
 - Each person's total is the plain half-up rounding of what they actually owe — `.5` and up goes up, below stays put — and the shares still add up to the bill exactly. Where arithmetic makes both impossible (two shares of exactly `.5`), one person gives a single rupiah rather than the bill going out by one.
 - **📷 Scan a receipt** fills in the item lines from the struk — photograph it with the camera right in the page, or pick a photo you already have. Reads on your device by default; add a Gemini key for a near-perfect read at the cost of sending the photo. See the caveat below.
-- **PDF** of the whole bill: on a phone the share sheet hands it straight to WhatsApp; on desktop it downloads.
+- **PDF** of the whole bill: on a phone the share sheet hands it straight to WhatsApp; on desktop it downloads. If you scanned a struk, the photo is on the last page — behind the numbers, so nobody has to scroll past it to find what they owe.
 - **Excel** of the same bill, for keeping your own history offline: a CSV with the items, the charges and a row per person, amounts as bare numbers so the columns add up. Opens in Excel, Numbers and Sheets, and stays readable in a text editor.
 - **▸ WhatsApp** per person: opens WhatsApp with their itemised share prefilled. Add their phone number to go straight to the chat, or leave it blank and pick the contact in WhatsApp.
 - Tick who paid the whole bill up front ("nalangin") and their message flips around: what they laid out, who owes them, and how much should come back. Everyone else's message names them, so nobody has to ask who to pay. What comes back plus the payer's own share is always the bill exactly.
@@ -41,6 +41,7 @@ The scan is a **starting point, not an answer**. A struk is thermal-printed, cre
 - Opens the camera in the page (`getUserMedia`, back camera where there is one) with a live preview, and grabs a single frame when you press **Take photo**. The stream is stopped the moment the sheet closes. No camera, no permission, or an insecure origin → it falls back to picking a photo, which reads exactly the same way.
 - Whichever reader runs, the photo is greyed and cut to 1600px first. A raw 12 MP photo reads as noise.
 - Scanned items are **added** to whatever is already there, never replacing it, and are ordinary editable rows.
+- The photo is kept with the bill and goes on the **last page of the PDF**, so a number can be checked against the paper it came from. Scanning again replaces it; **Start over** clears it. It is the only large thing in storage, so if it ever won't fit the bill is saved without it and the scan note says so.
 
 ### On your phone, by default
 
