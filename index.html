@@ -128,7 +128,7 @@
   /* Theme switch: three labels, one sliding thumb driven by --i. */
   .seg { position: relative; display: flex; padding: 3px; border-radius: 999px; background: var(--chip); }
   .seg::before {
-    content: ''; position: absolute; top: 3px; bottom: 3px; left: 3px; width: calc((100% - 6px) / 3);
+    content: ''; position: absolute; top: 3px; bottom: 3px; left: 3px; width: calc((100% - 6px) / var(--n, 3));
     border-radius: 999px; background: var(--card); box-shadow: var(--shadow);
     transform: translateX(calc(var(--i, 0) * 100%));
     transition: transform var(--move) var(--ease);
@@ -304,17 +304,22 @@
 
   <section>
     <h2>Transfer to</h2>
-    <div class="grid2">
-      <div><label for="payName">Account name</label><input id="payName" type="text" placeholder="Budi Santoso" maxlength="60"></div>
-      <div><label for="payBank">Bank</label><input id="payBank" type="text" placeholder="BCA" maxlength="30"></div>
-    </div>
-    <div style="margin-top:10px"><label for="payAcct">Account number</label><input id="payAcct" type="text" inputmode="numeric" placeholder="1234567890" maxlength="34"></div>
-    <p class="hint" style="margin-top:6px">Optional — added to each WhatsApp message and the PDF.</p>
+    <div id="pays"></div>
+    <div class="row" style="margin-top:10px"><button id="addPay">+ Add another account</button></div>
+    <p class="hint" style="margin-top:6px">Optional, and as many as you like — a bank account, an e-wallet, a QRIS name. All of them go into every WhatsApp message and the PDF, so people can pick whichever they have.</p>
   </section>
 
   <section>
     <h2>Who pays what</h2>
     <div id="summary"></div>
+    <div class="row" style="margin-top:16px; align-items:center">
+      <span class="hint" id="styleLabel" style="flex:0 0 auto">PDF style</span>
+      <div class="seg" id="pdfStyle" role="group" aria-labelledby="styleLabel" style="--n:2; flex:0 1 230px">
+        <button data-style="organised">Organised</button>
+        <button data-style="beautiful">Beautiful</button>
+      </div>
+    </div>
+    <p class="hint" style="margin-top:6px">Organised packs the figures in tight, for printing and filing. Beautiful gives them room, an accent and a footer — the same numbers, usually a page longer.</p>
   </section>
 
   <footer>Everything stays in this browser. Nothing is uploaded.</footer>
@@ -348,19 +353,22 @@ function el(tag, props = {}, kids = []) {
   return n;
 }
 
+// Two ways to set the same numbers: tight enough to file, or given room.
+const PDF_STYLES = ['organised', 'beautiful'];
+
 const blank = () => ({
   title: '', date: new Date().toISOString().slice(0, 10),
   participants: [], phones: {}, paidBy: '', items: [], photo: '',
   servicePct: 5, serviceAmt: '', taxPct: 11, taxAmt: '', taxOnService: true,
   discount: '', discountPct: '', roundTo: 0,
-  payName: '', payBank: '', payAcct: '',
+  pay: [], pdfStyle: 'beautiful',
 });
 
 const FIELDS = [['title', 'title'], ['date', 'date'],
                 ['svc', 'servicePct'], ['svcAmt', 'serviceAmt'],
                 ['tax', 'taxPct'], ['taxAmt', 'taxAmt'],
                 ['disc', 'discount'], ['discPct', 'discountPct'], ['roundTo', 'roundTo'],
-                ['payName', 'payName'], ['payBank', 'payBank'], ['payAcct', 'payAcct']];
+                ];
 
 let bill;
 try { bill = { ...blank(), ...JSON.parse(localStorage.getItem(KEY) || '{}') }; }
@@ -376,6 +384,20 @@ bill.items = (Array.isArray(bill.items) ? bill.items : []).map((it) => ({
   sharedBy: Array.isArray(it.sharedBy) ? it.sharedBy.map(String) : [],
 }));
 for (const k of ['serviceAmt', 'taxAmt', 'discount']) bill[k] = rupiah(bill[k]);
+if (!PDF_STYLES.includes(bill.pdfStyle)) bill.pdfStyle = 'beautiful';
+
+// One account used to live in three fields on the bill; now there is a list of
+// them. Carry the old one over rather than dropping somebody's saved details.
+bill.pay = (Array.isArray(bill.pay) ? bill.pay : []).map((a) => ({
+  bank: String(a?.bank ?? '').slice(0, 30),
+  acct: String(a?.acct ?? '').slice(0, 34),
+  name: String(a?.name ?? '').slice(0, 60),
+}));
+if (!bill.pay.length && (bill.payBank || bill.payAcct || bill.payName)) {
+  bill.pay = [{ bank: bill.payBank ?? '', acct: bill.payAcct ?? '', name: bill.payName ?? '' }];
+}
+delete bill.payBank; delete bill.payAcct; delete bill.payName;
+
 // The struk photo is a data URL out of storage and ends up inside a PDF, so
 // only a JPEG this app could have written itself is allowed through.
 bill.photo = /^data:image\/jpeg;base64,[A-Za-z0-9+/]+=*$/.test(bill.photo) && bill.photo.length < 4e6
@@ -858,13 +880,19 @@ const label = () => `${bill.title?.trim() || 'Split Bill'}${fmtDate(bill.date) ?
 // "Service 5%" when a percentage drives it, plain "Service" when it's a flat amount.
 const chargeLabel = (name, pct) => `${name}${Number(pct) ? ` ${pct}%` : ''}`;
 
-// Where to send the money. Two lines at most — "BCA 1234567890" / "a.n. Budi" —
-// and nothing at all when none of the three fields is filled in.
-function payLines() {
-  const [name, bank, acct] = ['payName', 'payBank', 'payAcct'].map((k) => (bill[k] ?? '').trim());
-  const account = [bank, acct].filter(Boolean).join(' ');
-  return [account, name && `a.n. ${name}`].filter(Boolean);
+// Where the money can go. One entry per account — "BCA 1234567890" with
+// "a.n. Budi" under it — and an account with nothing typed into it is dropped
+// rather than printed as a blank line.
+function payAccounts() {
+  return (bill.pay ?? [])
+    .map((a) => ({
+      account: [a.bank, a.acct].map((v) => (v ?? '').trim()).filter(Boolean).join('  '),
+      name: (a.name ?? '').trim(),
+    }))
+    .filter((a) => a.account || a.name);
 }
+// The same thing flattened, for the places that just want lines of text.
+const payLines = () => payAccounts().flatMap((a) => [a.account, a.name && `a.n. ${a.name}`].filter(Boolean));
 
 // The message each person receives. Same numbers as the PDF, just plain text.
 // Whoever fronted the bill gets the mirror image: not what they owe, but what
@@ -970,7 +998,58 @@ $('photoPick').onchange = async () => {
   renderPhoto();
 };
 
-function renderAll() { renderPeople(); renderItems(); renderSummary(); renderPhoto(); }
+// Transfer accounts, in the shape of the participant rows above: bank and
+// number on one line because they are read together, the name under them
+// because it is what people check before they press send.
+function renderPays() {
+  const box = $('pays');
+  box.textContent = '';
+  bill.pay.forEach((acct, i) => {
+    const field = (key, props) => {
+      const input = el('input', { type: 'text', value: acct[key] ?? '', ...props });
+      input.oninput = () => { acct[key] = input.value; save(); renderSummary(); };
+      return input;
+    };
+    const del = el('button', {
+      className: 'icon', title: 'Remove this account', textContent: '✕',
+      onclick: async () => {
+        await swipeOut(del.closest('.item'));
+        bill.pay.splice(i, 1); save(); renderPays(); renderSummary();
+      },
+    });
+    box.append(el('div', { className: 'item' }, [
+      el('div', { className: 'row' }, [
+        field('bank', { placeholder: 'Bank or wallet', maxLength: 30, ariaLabel: 'Bank or wallet', style: 'flex:1 1 40%' }),
+        field('acct', { placeholder: 'Account number', inputMode: 'numeric', maxLength: 34, ariaLabel: 'Account number', style: 'flex:1 1 60%' }),
+        del,
+      ]),
+      el('div', { className: 'row', style: 'margin-top:8px' }, [
+        field('name', { placeholder: 'Account name (optional)', maxLength: 60, ariaLabel: 'Account name, optional', style: 'flex:1 1 auto' }),
+      ]),
+    ]));
+  });
+  if (!bill.pay.length) box.append(el('p', { className: 'hint', textContent: 'No account yet — nothing about where to pay goes out.' }));
+}
+
+$('addPay').onclick = () => {
+  bill.pay.push({ bank: '', acct: '', name: '' });
+  save(); renderPays();
+  markNew('pays', '.item');
+  $('pays').querySelector('.item:last-of-type input')?.focus();
+};
+
+const styleSeg = $('pdfStyle');
+function renderPdfStyle() {
+  styleSeg.style.setProperty('--i', PDF_STYLES.indexOf(bill.pdfStyle)); // slides the thumb
+  for (const b of styleSeg.children) b.setAttribute('aria-pressed', String(b.dataset.style === bill.pdfStyle));
+}
+styleSeg.onclick = (e) => {
+  const v = e.target.closest('button')?.dataset.style;
+  if (!v || v === bill.pdfStyle) return;
+  bill.pdfStyle = v; save(); renderPdfStyle();
+};
+
+function renderAll() { renderPeople(); renderItems(); renderSummary(); renderPhoto(); renderPays(); renderPdfStyle(); }
 renderAll();
 
 // --- PDF -------------------------------------------------------------------
@@ -978,55 +1057,185 @@ function buildPdf() {
   const { jsPDF } = window.jspdf ?? {};
   if (!jsPDF) throw new Error('PDF library did not load — check your connection.');
   const doc = new jsPDF({ unit: 'pt', format: 'a4' });
-  const W = 595, M = 44, RIGHT = W - M;
-  let y = 56;
-  const page = (need = 16) => { if (y + need > 800) { doc.addPage(); y = 56; } };
-  const line = (left, right, { size = 10, bold = false, gap = 15, indent = 0 } = {}) => {
-    page(gap);
+
+  // Two settings of the same numbers. Organised is the working copy: tight
+  // margins, everything as close to one page as it will go. Beautiful is the
+  // one you would send to the table: room to breathe, an accent borrowed from
+  // the app, an inked total and a footer. Helvetica in both: the nearest of the
+  // three faces built into a PDF to the system stack the app sets on screen,
+  // and embedding a real one would cost every export a hundred kilobytes.
+  const lush = bill.pdfStyle !== 'organised';
+  const W = 595, M = lush ? 52 : 44, RIGHT = W - M;
+  const TOP = lush ? 60 : 54, FLOOR = lush ? 778 : 792, FOOT = 812;
+  const INK = [20, 24, 31], FIGURE = [46, 52, 63], LABEL = [96, 104, 118];
+  const FAINT = [152, 160, 172], HAIR = [226, 230, 235];
+  const PANEL = [246, 247, 249], PANEL_EDGE = [232, 235, 239];
+  const ACCENT = [15, 118, 110];
+  const PAID = [236, 246, 244], PAID_EDGE = [206, 230, 226];
+  const PAID_LABEL = [82, 112, 107], PAID_FIGURE = [38, 74, 69];
+  let y = TOP;
+
+  const put = (s, x, at, { size = 10, bold = false, ink = INK, align = 'left', space = 0 } = {}) => {
+    doc.setFont('helvetica', bold ? 'bold' : 'normal').setFontSize(size).setTextColor(...ink);
+    doc.text(String(s), x, at, { align, charSpace: space });
+  };
+  const wide = (s, size, bold) => {
     doc.setFont('helvetica', bold ? 'bold' : 'normal').setFontSize(size);
-    doc.text(String(left), M + indent, y);
-    if (right != null) doc.text(String(right), RIGHT, y, { align: 'right' });
+    return doc.getTextWidth(String(s));
+  };
+  // A struk can spend forty characters naming a dish. Cut it rather than let it
+  // run into the amount, which is the one thing that has to stay readable.
+  const clip = (s, max, size, bold) => {
+    let out = String(s);
+    if (wide(out, size, bold) <= max) return out;
+    while (out.length > 1 && wide(`${out}…`, size, bold) > max) out = out.slice(0, -1);
+    return `${out}…`;
+  };
+  const room = (need) => { if (y + need > FLOOR) { doc.addPage(); y = TOP; } };
+  const rule = (at, ink = HAIR, w = 0.6, from = M, to = RIGHT) => {
+    doc.setDrawColor(...ink).setLineWidth(w).line(from, at, to, at);
+  };
+
+  // Section labels carry three rows with them. A label alone at the foot of a
+  // page, its contents overleaf, reads as the end of the document.
+  const heading = (label) => {
+    room(52 + 3 * 16);
+    y += lush ? 30 : 24;
+    put(label, M, y, { size: 8, bold: true, ink: LABEL, space: 1.5 });
+    y += lush ? 8 : 7;
+    rule(y);
+    y += lush ? 17 : 15;
+  };
+
+  // Beautiful puts "Rp" only on the figures that carry the page — repeated down
+  // a column of twenty it is noise, and the column is unmistakably money
+  // without it. Organised keeps it everywhere, the way a printed statement does.
+  const rp = (n) => `Rp ${money(n)}`;
+  const amt = (n) => (lush ? money(n) : `Rp ${money(n)}`);
+
+  const row = (label, amount, { size = 10, bold = false, ink = INK, gap = 16, sub = '', tint = LABEL } = {}) => {
+    room(gap);
+    const wa = amount == null ? 0 : wide(amount, size, bold) + 20;
+    const ws = sub ? wide(`   ${sub}`, size - 1.5, false) : 0;
+    const cut = clip(label, RIGHT - M - wa - ws, size, bold);
+    put(cut, M, y, { size, bold, ink });
+    if (sub) put(`   ${sub}`, M + wide(cut, size, bold), y, { size: size - 1.5, ink: tint });
+    if (amount != null) put(amount, RIGHT, y, { size, bold, ink, align: 'right' });
     y += gap;
   };
-  const rule = () => { page(10); doc.setDrawColor(210).line(M, y - 9, RIGHT, y - 9); };
 
-  line(bill.title?.trim() || 'Split Bill', null, { size: 17, bold: true, gap: 20 });
-  line(fmtDate(bill.date), `Total  Rp ${money(result.total)}`, { size: 10, gap: 24 });
+  // --- masthead. The bill, and the one number everybody wants before reading on.
+  put(bill.title?.trim() || 'Split Bill', M, y + 16, { size: lush ? 23 : 19, bold: true, space: -0.4 });
+  put(rp(result.total), RIGHT, y + 16, { size: lush ? 20 : 16, bold: true, align: 'right', space: -0.3 });
+  const heads = `${result.people.length} ${result.people.length === 1 ? 'person' : 'people'}`;
+  put([fmtDate(bill.date), heads].filter(Boolean).join('   ·   '), M, y + 33, { size: 9.5, ink: LABEL });
+  put('total for the table', RIGHT, y + 32, { size: 8.5, ink: LABEL, align: 'right' });
+  y += lush ? 48 : 42;
+  // The one deliberate stroke of colour at the top of the page.
+  rule(y, lush ? ACCENT : HAIR, lush ? 1.6 : 0.6);
+  y += 2;
 
-  line('ITEMS', null, { size: 9, bold: true, gap: 16 });
-  for (const it of bill.items) {
-    const who = it.sharedBy.length ? sharedByLabel(it.sharedBy) : 'everyone';
-    line(`${it.name || 'Item'}  —  ${who}`, `Rp ${money(Number(it.amount) || 0)}`);
-  }
-  rule();
-  line('Subtotal', `Rp ${money(result.subtotal)}`, { bold: true });
-  if (result.service) line(chargeLabel('Service charge', bill.servicePct), `Rp ${money(result.service)}`);
-  if (result.tax) line(chargeLabel('Tax', bill.taxPct), `Rp ${money(result.tax)}`);
-  if (result.discount) line(`${chargeLabel('Discount', bill.discountPct)} (split ${result.people.length})`, `- Rp ${money(result.discount)}`);
-  if (result.rounding) line(`Rounding (split ${result.people.length})`, `- Rp ${money(result.rounding)}`);
-  line('TOTAL', `Rp ${money(result.total)}`, { size: 12, bold: true, gap: bill.paidBy ? 18 : 28 });
-  if (bill.paidBy) {
-    line(`${bill.paidBy} paid up front`, `owed Rp ${money(collect(result, bill.paidBy).due)}`, { gap: 28 });
-  }
-
-  line('WHO PAYS WHAT', null, { size: 9, bold: true, gap: 16 });
-  for (const p of result.people) {
-    line(`${p.name}${p.name === bill.paidBy ? ' (paid up front)' : ''}`, `Rp ${money(p.total)}`, { size: 11, bold: true });
-    for (const l of p.lines) {
-      line(`${l.name || 'Item'}${shareLabel(l) ? ` (${shareLabel(l)})` : ''}`, `Rp ${money(l.share)}`, { size: 9, gap: 13, indent: 12 });
+  // --- who pays what, first, because that is what the PDF gets opened for.
+  // A card each: name and number in the same eyeline, the reasons beneath in a
+  // quieter voice, and whoever fronted the bill picked out in the accent.
+  heading('WHO PAYS WHAT');
+  // The "gets back" line belongs to the cards, so the last card reserves its
+  // space too. Alone at the top of the next page it reads as a stray figure.
+  const tail = bill.paidBy ? 22 : 0;
+  result.people.forEach((p, idx) => {
+    const keep = idx === result.people.length - 1 ? tail : 0;
+    const fronted = p.name === bill.paidBy;
+    const detail = [
+      ...p.lines.map((l) => [`${l.name || 'Item'}${shareLabel(l) ? `   ${shareLabel(l)}` : ''}`, money(l.share)]),
+      ...(p.service ? [['Service charge', money(p.service)]] : []),
+      ...(p.tax ? [['Tax', money(p.tax)]] : []),
+      ...(p.discount ? [['Discount', `- ${money(p.discount)}`]] : []),
+      ...(p.rounding ? [['Rounding', `- ${money(p.rounding)}`]] : []),
+    ];
+    const h = detail.length ? (lush ? 51 : 44) + detail.length * (lush ? 13 : 12.5) : (lush ? 44 : 38);
+    // A card is a unit: it crosses a page whole or not at all. Only somebody
+    // with about fifty items of their own could outgrow a page, and then the
+    // rows simply flow on their own rather than falling off the bottom of it.
+    const whole = h + 10 <= FLOOR - TOP;
+    const label = fronted ? PAID_LABEL : LABEL;
+    const figure = fronted ? PAID_FIGURE : FIGURE;
+    if (whole) {
+      room(h + 10 + keep);
+      const pad = lush ? 16 : 13;
+      doc.setFillColor(...(fronted ? PAID : PANEL));
+      if (lush) {
+        doc.setDrawColor(...(fronted ? PAID_EDGE : PANEL_EDGE)).setLineWidth(0.6);
+        doc.roundedRect(M, y, RIGHT - M, h, 8, 8, 'FD');
+      } else {
+        doc.roundedRect(M, y, RIGHT - M, h, 5, 5, 'F');
+      }
+      const nameSize = lush ? 12 : 11.5;
+      put(p.name, M + pad, y + (lush ? 24 : 22), { size: nameSize, bold: true });
+      if (fronted) put(`   paid up front`, M + pad + wide(p.name, nameSize, true), y + (lush ? 24 : 22), { size: 8.5, ink: label });
+      put(rp(p.total), RIGHT - pad, y + (lush ? 24 : 23), { size: lush ? 14 : 13, bold: true, ink: fronted ? ACCENT : INK, align: 'right', space: -0.2 });
+      if (lush && detail.length) rule(y + 35, fronted ? PAID_EDGE : PANEL_EDGE, 0.6, M + pad, RIGHT - pad);
+      let at = y + (lush ? 51 : 41);
+      for (const [name, amount] of detail) {
+        const wa = wide(amount, 9, false) + 20;
+        put(clip(name, RIGHT - 2 * pad - M - wa, 9, false), M + pad, at, { size: 9, ink: label });
+        put(amount, RIGHT - pad, at, { size: 9, ink: figure, align: 'right' });
+        at += lush ? 13 : 12.5;
+      }
+      y += h + (lush ? 10 : 8);
+    } else {
+      row(p.name, rp(p.total), { size: 12, bold: true, gap: 18 });
+      for (const [name, amount] of detail) row(name, amount, { size: 9, ink: label, gap: 13 });
+      y += 10;
     }
-    if (p.service) line('Service charge', `Rp ${money(p.service)}`, { size: 9, gap: 13, indent: 12 });
-    if (p.tax) line('Tax', `Rp ${money(p.tax)}`, { size: 9, gap: 13, indent: 12 });
-    if (p.discount) line('Discount', `- Rp ${money(p.discount)}`, { size: 9, gap: 13, indent: 12 });
-    if (p.rounding) line('Rounding', `- Rp ${money(p.rounding)}`, { size: 9, gap: 13, indent: 12 });
-    y += 6;
+  });
+
+  // The mirror image for whoever laid the money out — the only figure on the
+  // page that moves the other way, so it is the only other one in the accent.
+  if (bill.paidBy) {
+    y += 4;
+    row(`${bill.paidBy} gets back`, rp(collect(result, bill.paidBy).due),
+        { size: 10.5, bold: true, ink: ACCENT, gap: 18 });
   }
 
-  const pay = payLines();
-  if (pay.length) {
-    y += 8;
-    line('TRANSFER TO', null, { size: 9, bold: true, gap: 16 });
-    for (const l of pay) line(l, null, { size: 11 });
+  // --- the arithmetic behind it, for anyone who wants to check
+  heading('THE BILL');
+  for (const it of bill.items) {
+    row(it.name || 'Item', amt(Number(it.amount) || 0),
+        { ink: FIGURE, sub: it.sharedBy.length ? sharedByLabel(it.sharedBy) : 'everyone' });
+  }
+  y += 7;
+  room(10); rule(y); y += 17;
+  row('Subtotal', amt(result.subtotal), { ink: FIGURE });
+  if (result.service) row(chargeLabel('Service charge', bill.servicePct), amt(result.service), { ink: LABEL });
+  if (result.tax) row(chargeLabel('Tax', bill.taxPct), amt(result.tax), { ink: LABEL });
+  if (result.discount) {
+    row(chargeLabel('Discount', bill.discountPct), `- ${amt(result.discount)}`,
+        { ink: LABEL, sub: `split ${result.people.length}` });
+  }
+  if (result.rounding) {
+    row('Rounding', `- ${amt(result.rounding)}`, { ink: LABEL, sub: `split ${result.people.length}` });
+  }
+  y += 6;
+  room(38);
+  // Beautiful inks the band so the one number everyone verifies is unmissable;
+  // organised keeps it light, because a filled block eats a printer's toner.
+  const band = lush ? 32 : 28, pen = lush ? [255, 255, 255] : INK;
+  doc.setFillColor(...(lush ? INK : PANEL));
+  doc.roundedRect(M, y, RIGHT - M, band, lush ? 7 : 5, lush ? 7 : 5, 'F');
+  put('TOTAL', M + (lush ? 16 : 13), y + (lush ? 21 : 18), { size: 8.5, bold: true, ink: pen, space: 1.5 });
+  put(rp(result.total), RIGHT - (lush ? 16 : 13), y + (lush ? 21 : 19), { size: lush ? 14 : 13, bold: true, ink: pen, align: 'right', space: -0.2 });
+  y += band;
+
+  // --- where the money goes. Several accounts is the point: people hold
+  // different banks, and a transfer to the wrong one costs a day.
+  const accounts = payAccounts();
+  if (accounts.length) {
+    heading(accounts.length > 1 ? 'TRANSFER TO ANY OF THESE' : 'TRANSFER TO');
+    for (const a of accounts) {
+      room(a.name ? 32 : 20);
+      if (a.account) row(a.account, null, { size: 11.5, bold: true, gap: a.name ? 14 : 20 });
+      if (a.name) row(`a.n. ${a.name}`, null, { size: 9, ink: LABEL, gap: 20 });
+    }
   }
 
   // The struk itself, on its own page at the back. Whoever wants to check a
@@ -1034,11 +1243,21 @@ function buildPdf() {
   // doesn't have to scroll past a photograph to find out.
   if (bill.photo) {
     doc.addPage();
-    y = 56;
-    line('THE STRUK', null, { size: 9, bold: true, gap: 16 });
-    const { width, height } = doc.getImageProperties(bill.photo);
-    const fit = Math.min((RIGHT - M) / width, (800 - y) / height);
-    doc.addImage(bill.photo, 'JPEG', M, y, width * fit, height * fit);
+    y = TOP - 30; // the heading opens with its own space, which the page top already gives
+    heading('THE STRUK');
+    const { width: iw, height: ih } = doc.getImageProperties(bill.photo);
+    const fit = Math.min((RIGHT - M) / iw, (FLOOR - y) / ih);
+    doc.addImage(bill.photo, 'JPEG', M, y, iw * fit, ih * fit);
+    doc.setDrawColor(...HAIR).setLineWidth(0.6).rect(M, y, iw * fit, ih * fit);
+  }
+
+  // A footer on every page, stamped once the page count is known. It is what
+  // makes a stack of these feel like a document rather than a screenshot.
+  const pages = lush ? doc.getNumberOfPages() : 0;
+  for (let n = 1; n <= pages; n++) {
+    doc.setPage(n);
+    put(bill.title?.trim() || 'Split Bill', M, FOOT, { size: 7.5, ink: FAINT });
+    put(`${n} / ${pages}`, RIGHT, FOOT, { size: 7.5, ink: FAINT, align: 'right' });
   }
   return doc;
 }

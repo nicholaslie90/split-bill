@@ -269,8 +269,11 @@ export function toCsv(bill, result) {
     ['All', '', '', result.subtotal, result.service, result.tax, -result.discount, -result.rounding, result.total],
   ];
   if (paidBy) rows.push([], ['Paid up front by', paidBy], ['Owed back', collect(result, paidBy).due]);
-  const pay = [bill.payBank, bill.payAcct, bill.payName].map((s) => (s ?? '').trim()).filter(Boolean);
-  if (pay.length) rows.push([], ['Transfer to', ...pay]);
+  // One row per account, so a sheet with three of them still reads as three.
+  const pay = (bill.pay ?? [])
+    .map((a) => [a?.bank, a?.acct, a?.name].map((v) => (v ?? '').trim()).filter(Boolean))
+    .filter((a) => a.length);
+  if (pay.length) rows.push([], ['Transfer to', ...pay[0]], ...pay.slice(1).map((a) => ['', ...a]));
   // `sep=,` has to reach the file unquoted, so it goes in outside the escaping.
   return ['sep=,', ...rows.map((r) => r.map(cell).join(','))].join('\r\n');
 }

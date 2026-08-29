@@ -487,7 +487,7 @@ assert.deepEqual(roundToSum([1142.5, 1142.5], 2285), [1143, 1142]);
     title: 'Kopo Thai', date: '2026-07-29',
     participants: ['Fav', 'Dwita'], phones: { Fav: '08123456789' }, paidBy: 'Fav',
     items: [{ name: 'krapao', amount: '130000', sharedBy: ['Dwita'] }, { name: 'tea', amount: '10000', sharedBy: [] }],
-    payBank: 'BCA', payAcct: '1234567890', payName: 'Fav Santoso',
+    pay: [{ bank: 'BCA', acct: '1234567890', name: 'Fav Santoso' }, { bank: 'GoPay', acct: '08123456789', name: '' }],
   };
   const r = calcShares(bill);
   const csv = toCsv(bill, r);
@@ -501,6 +501,9 @@ assert.deepEqual(roundToSum([1142.5, 1142.5], 2285), [1143, 1142]);
   assert.ok(rows.includes('Paid up front by,Fav'));
   assert.ok(rows.includes(`Owed back,${collect(r, 'Fav').due}`));
   assert.ok(rows.includes('Transfer to,BCA,1234567890,Fav Santoso'));
+  assert.ok(rows.includes(',GoPay,08123456789')); // a second account is its own row
+  // An account with nothing typed into it is not a row at all.
+  assert.ok(!toCsv({ ...bill, pay: [{ bank: '', acct: '', name: '' }] }, r).includes('Transfer to'));
   // the per-person Total column must add up to the bill's own Total row
   const cols = rows.filter((l) => /^(Fav|Dwita),/.test(l)).map((l) => Number(l.split(',').at(-1)));
   assert.equal(cols.reduce((a, b) => a + b, 0), r.total);
