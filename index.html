@@ -244,6 +244,12 @@
       </div>
     </dialog>
     <p class="hint" id="scanNote" style="margin-top:8px" aria-live="polite"></p>
+    <!-- Only there once a struk has been scanned: the photo is invisible until
+         the PDF, so it says so, and offers the way back out. -->
+    <div class="row" id="photoRow" hidden style="margin-top:10px">
+      <p class="hint" id="photoNote" style="flex:1 1 auto"></p>
+      <button id="photoDrop" style="flex:0 0 auto">Remove photo</button>
+    </div>
     <!-- Optional, and the only thing on this page that ever leaves the device.
          Kept out of the bill so "Start over" and the exports can't carry it. -->
     <div style="margin-top:10px">
@@ -925,7 +931,22 @@ function renderSummary() {
   box.append(t);
 }
 
-function renderAll() { renderPeople(); renderItems(); renderSummary(); }
+// The struk photo has nowhere to show itself until the PDF is opened, so the
+// row is the only sign it is there — and the only way to change your mind.
+function renderPhoto() {
+  $('photoRow').hidden = !bill.photo;
+  if (!bill.photo) return;
+  const kb = Math.round((bill.photo.length * 3) / 4096); // base64 back to kilobytes
+  $('photoNote').textContent = `Struk photo attached, ${kb} KB — it goes on the last page of the PDF.`;
+}
+$('photoDrop').onclick = () => {
+  bill.photo = '';
+  save();
+  renderPhoto();
+  note(`Photo removed, so the PDF goes without it. ${KEEP()}`);
+};
+
+function renderAll() { renderPeople(); renderItems(); renderSummary(); renderPhoto(); }
 renderAll();
 
 // --- PDF -------------------------------------------------------------------
