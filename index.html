@@ -849,7 +849,7 @@ async function scanFile(file) {
   try {
     const shot = await prepare(file);
     const { items, total } = await (geminiKey() ? readWithGemini(shot) : readHere(shot));
-    // The struk goes on the back of the PDF whether or not the reading worked —
+    // The struk goes at the foot of the PDF whether or not the reading worked —
     // if anything, a scan that came back empty is when you most want the paper
     // attached. One photo, the latest: scanning again replaces it.
     bill.photo = shot.toDataURL('image/jpeg', 0.8);
@@ -863,7 +863,7 @@ async function scanFile(file) {
         ? `Added ${items.length} item${items.length > 1 ? 's' : ''}, Rp ${money(read)} in total.`
         : `Couldn't make out any item lines — add them by hand.`,
       total ? `The struk says its total is Rp ${money(total)} — service, tax and discount make up the difference.` : '',
-      kept ? 'The photo is on the last page of the PDF.' : 'The photo was too big to keep, so the PDF goes without it.',
+      kept ? 'The photo goes at the foot of the PDF.' : 'The photo was too big to keep, so the PDF goes without it.',
       KEEP(),
     ].filter(Boolean).join(' '));
   } catch (e) {
@@ -968,7 +968,7 @@ function renderSummary() {
 function renderPhoto() {
   const kb = Math.round((bill.photo.length * 3) / 4096); // base64 back to kilobytes
   $('photoNote').textContent = bill.photo
-    ? `Struk photo attached, ${kb} KB — it goes on the last page of the PDF.`
+    ? `Struk photo attached, ${kb} KB — it goes at the foot of the PDF.`
     : 'No struk photo — the PDF will be just the numbers.';
   $('photoDrop').textContent = bill.photo ? 'Remove photo' : 'Add photo';
 }
@@ -990,7 +990,7 @@ $('photoPick').onchange = async () => {
   try {
     bill.photo = (await prepare(file)).toDataURL('image/jpeg', 0.8);
     note(save()
-      ? `Photo attached — it goes on the last page of the PDF. ${KEEP()}`
+      ? `Photo attached — it goes at the foot of the PDF. ${KEEP()}`
       : `That photo was too big to keep, so the PDF goes without it. ${KEEP()}`);
   } catch {
     note(`Couldn't read that photo — try another. ${KEEP()}`);
@@ -1053,10 +1053,23 @@ function renderAll() { renderPeople(); renderItems(); renderSummary(); renderPho
 renderAll();
 
 // --- PDF -------------------------------------------------------------------
-function buildPdf() {
+// One tall page rather than a stack of A4s: this gets read on a phone, where
+// scrolling is free and a page break in the middle of a card is not. The height
+// is not known until the last row is drawn, so the whole thing is drawn twice —
+// once against the tallest page a PDF may have to find out, then again at the
+// height that came out. Cheap enough at this size, and nothing here depends on
+// the page height except where the footer sits.
+const PDF_MAX_H = 14400; // the ceiling every PDF viewer honours (200in)
+function buildPdf(H) {
   const { jsPDF } = window.jspdf ?? {};
   if (!jsPDF) throw new Error('PDF library did not load — check your connection.');
-  const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+  if (H == null) {
+    const measured = buildPdf(PDF_MAX_H);
+    // A bill that outgrows even 14400pt goes out as it was measured: several
+    // very tall pages rather than one impossible one. Takes about two hundred
+    // people to get there, so in practice this is always the single page.
+    return measured.getNumberOfPages() > 1 ? measured : buildPdf(measured.__h);
+  }
 
   // Two settings of the same numbers. Organised is the working copy: tight
   // margins, everything as close to one page as it will go. Beautiful is the
@@ -1066,7 +1079,11 @@ function buildPdf() {
   // and embedding a real one would cost every export a hundred kilobytes.
   const lush = bill.pdfStyle !== 'organised';
   const W = 595, M = lush ? 52 : 44, RIGHT = W - M;
-  const TOP = lush ? 60 : 54, FLOOR = lush ? 778 : 792, FOOT = 812;
+  const TOP = lush ? 60 : 54, FOOT = H - 30;
+  // Only the measuring pass has a floor to hit; the second is drawn at the
+  // height the first came out to, so nothing may break off the bottom of it.
+  const FLOOR = H < PDF_MAX_H ? Infinity : H - (lush ? 64 : 50);
+  const doc = new jsPDF({ unit: 'pt', format: [W, H] });
   const INK = [20, 24, 31], FIGURE = [46, 52, 63], LABEL = [96, 104, 118];
   const FAINT = [152, 160, 172], HAIR = [226, 230, 235];
   const PANEL = [246, 247, 249], PANEL_EDGE = [232, 235, 239];
@@ -1238,26 +1255,28 @@ function buildPdf() {
     }
   }
 
-  // The struk itself, on its own page at the back. Whoever wants to check a
-  // number against the paper can; whoever just wants to know what they owe
-  // doesn't have to scroll past a photograph to find out.
+  // The struk itself, last of all. Whoever wants to check a number against the
+  // paper scrolls on to it; whoever just wants to know what they owe has read
+  // everything they came for before it starts.
   if (bill.photo) {
-    doc.addPage();
-    y = TOP - 30; // the heading opens with its own space, which the page top already gives
     heading('THE STRUK');
     const { width: iw, height: ih } = doc.getImageProperties(bill.photo);
-    const fit = Math.min((RIGHT - M) / iw, (FLOOR - y) / ih);
+    // Full width, however tall that makes it — the page has no bottom to fit it
+    // into any more, and a struk shrunk to fit one is a struk you cannot read.
+    const fit = (RIGHT - M) / iw;
     doc.addImage(bill.photo, 'JPEG', M, y, iw * fit, ih * fit);
     doc.setDrawColor(...HAIR).setLineWidth(0.6).rect(M, y, iw * fit, ih * fit);
+    y += ih * fit;
   }
 
-  // A footer on every page, stamped once the page count is known. It is what
-  // makes a stack of these feel like a document rather than a screenshot.
-  const pages = lush ? doc.getNumberOfPages() : 0;
-  for (let n = 1; n <= pages; n++) {
+  doc.__h = y + (lush ? 64 : 50); // the height the second pass is drawn at
+
+  // A footer at the foot of the page — what makes this feel like a document
+  // rather than a screenshot. No page numbers: there is only ever the one page.
+  for (let n = 1; lush && n <= doc.getNumberOfPages(); n++) {
     doc.setPage(n);
     put(bill.title?.trim() || 'Split Bill', M, FOOT, { size: 7.5, ink: FAINT });
-    put(`${n} / ${pages}`, RIGHT, FOOT, { size: 7.5, ink: FAINT, align: 'right' });
+    put(fmtDate(bill.date) || '', RIGHT, FOOT, { size: 7.5, ink: FAINT, align: 'right' });
   }
   return doc;
 }
