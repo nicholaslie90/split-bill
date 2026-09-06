@@ -110,13 +110,16 @@
   .row { display: flex; gap: 8px; align-items: end; }
   .row > * { flex: 1; }
   .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-  button {
+  button, .btn {
     background: var(--chip); border: 1px solid var(--line); border-radius: 11px;
     padding: 10px 13px; cursor: pointer; touch-action: manipulation;
     transition: transform var(--tap) var(--ease), background-color var(--tap) var(--ease),
                 color var(--tap) var(--ease), box-shadow var(--tap) var(--ease);
   }
-  button:active { transform: scale(.96); }
+  button:active, .btn:active { transform: scale(.96); }
+  /* The one label that is a button. Centred like one, and it keeps the label
+     element's own baseline out of it. */
+  .btn { display: flex; align-items: center; justify-content: center; margin: 0; font: inherit; color: inherit; }
   button:disabled { opacity: .55; cursor: default; transform: none; }
   input:disabled { opacity: .5; }
   button.primary {
@@ -269,9 +272,6 @@
       <button id="addItem">+ Add item</button>
       <button id="scan">📷 Scan a receipt</button>
     </div>
-    <!-- No capture attribute: that would force the OS camera and take the
-         choice away. This input is the "pick a photo I already have" path. -->
-    <input id="shot" type="file" accept="image/*" hidden>
     <!-- Native dialog: modal behaviour, a backdrop and Esc to dismiss, without
          a line of JavaScript to manage any of it. -->
     <dialog id="cam" aria-label="Photograph the receipt">
@@ -279,7 +279,15 @@
       <p class="hint" style="margin:8px 0">Fill the frame with the receipt, straight on and in good light — that is most of what makes the reading accurate.</p>
       <div class="row">
         <button id="shoot" class="primary">Take photo</button>
-        <button id="pick">Choose a photo</button>
+        <!-- A label, not a button that clicks the input in script. A modal
+             dialog makes the whole page outside it inert, and a file picker
+             opened from script needs a live tap the browser still recognises
+             as one: on Android that combination quietly does nothing. A label
+             pointing at an input in the same dialog is the browser's own path
+             to the picker and needs neither. No capture attribute either: that
+             would force the camera and take the choice away. -->
+        <label id="pick" class="btn" for="shot">Choose a photo</label>
+        <input id="shot" type="file" accept="image/*" class="sr">
         <button id="camClose">Cancel</button>
       </div>
     </dialog>
@@ -1049,7 +1057,6 @@ $('scan').onclick = async () => {
 };
 
 $('camClose').onclick = closeCam;
-$('pick').onclick = () => { closeCam(); $('shot').click(); };
 
 $('shoot').onclick = () => {
   const [w, h] = [feed.videoWidth, feed.videoHeight];
@@ -1063,6 +1070,10 @@ $('shoot').onclick = () => {
 $('shot').onchange = () => {
   const file = $('shot').files?.[0];
   $('shot').value = ''; // so picking the same photo twice still fires
+  // The camera sheet is still open behind the picker — on purpose, so that
+  // cancelling the picker puts you back in front of the camera rather than
+  // nowhere. A photo chosen is the end of it.
+  closeCam();
   if (file) scanFile(file);
 };
 
