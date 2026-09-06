@@ -172,6 +172,16 @@
     background: var(--card); color: var(--ink); box-shadow: var(--shadow);
   }
   dialog::backdrop { background: light-dark(rgba(20, 24, 31, .55), rgba(0, 0, 0, .68)); }
+  /* A sheet's title is a question, not a section label: it keeps its case. */
+  dialog h2 { font-size: 17px; text-transform: none; letter-spacing: -0.01em; color: var(--ink); }
+  /* Two ways to have the same numbers, each with its reason under it. Stacked,
+     because reading a sentence off a segmented control is nobody's idea. */
+  .pick { display: grid; gap: 8px; }
+  .pick button { display: block; width: 100%; text-align: left; padding: 12px 13px; }
+  .pick b { display: block; margin-bottom: 2px; }
+  .pick .hint { display: block; font-size: 13px; text-wrap: pretty; }
+  .pick button[aria-pressed=true] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+  .pick button[aria-pressed=true] .hint { color: inherit; opacity: .8; }
   dialog video {
     display: block; width: 100%; max-height: 58vh; border-radius: 12px; background: #000;
   }
@@ -339,14 +349,9 @@
     <h2>Who pays what</h2>
     <div id="summary"></div>
     <p id="say" class="sr" role="status" aria-live="polite"></p>
-    <div class="row" style="margin-top:16px; align-items:center">
-      <span class="hint" id="styleLabel" style="flex:0 0 auto">PDF style</span>
-      <div class="seg" id="pdfStyle" role="group" aria-labelledby="styleLabel" style="--n:2; flex:0 1 230px">
-        <button data-style="organised">Organised</button>
-        <button data-style="beautiful">Beautiful</button>
-      </div>
-    </div>
-    <p class="hint" style="margin-top:6px">Organised packs the figures in tight, for printing and filing. Beautiful gives them room, an accent and a footer — the same numbers, usually a page longer.</p>
+    <!-- The two settings used to sit here all day for a choice made once, at
+         the end, by whoever was about to send something. Now they are asked
+         for at that moment instead, by the sheet below. -->
     <!-- Copies for yourself, not for the table: the buttons beside each name
          are what sends anybody anything. They sit here, at the end of the work,
          because that is where you already are when you want them — a bar fixed
@@ -369,6 +374,24 @@
     <input id="billFile" type="file" accept="application/json,.json" hidden>
     <p class="hint" style="margin-top:6px">Every bill here stays in this browser. Saving one as a file is how it moves to another phone, or how you keep it after this browser forgets.</p>
   </section>
+
+  <!-- Asked at the moment the PDF is wanted, not kept on the page all day.
+       The tap that picks a setting is itself the gesture the share sheet needs,
+       so the file can go straight out from here. -->
+  <dialog id="ask" aria-labelledby="askTitle">
+    <h2 id="askTitle" style="margin-bottom:12px">Which PDF?</h2>
+    <div class="pick">
+      <button data-style="beautiful">
+        <b>Beautiful</b>
+        <span class="hint">Room to breathe, an accent rule, an inked total and a footer. The one you would send to the table.</span>
+      </button>
+      <button data-style="organised">
+        <b>Organised</b>
+        <span class="hint">The figures packed in tight, for printing and filing. The same numbers, usually shorter.</span>
+      </button>
+    </div>
+    <div class="row" style="margin-top:12px"><button id="askClose">Cancel</button></div>
+  </dialog>
 
   <footer>Everything stays in this browser. Nothing is uploaded.</footer>
 </main>
@@ -1218,7 +1241,7 @@ function renderSummary() {
     // Web, and the PDF button at the foot of the page saves the file.
     const withFile = CAN_SHARE_FILE
       ? iconButton('wa', WA + CLIP, `Send ${what} on WhatsApp with the bill attached — the message is copied, ready to paste under it`,
-          () => { copyMessage(); sharePdf(); sent(); })
+          () => askStyle(() => { copyMessage(); sharePdf(); sent(); }))
       : iconButton('wa', COPY, `Copy ${p.name}'s message`, () => copyMessage());
 
     const right = el('div', { style: 'text-align:right; white-space:nowrap' }, [
@@ -1315,18 +1338,32 @@ $('addPay').onclick = () => {
   $('pays').querySelector('.item:last-of-type input')?.focus();
 };
 
-const styleSeg = $('pdfStyle');
-function renderPdfStyle() {
-  styleSeg.style.setProperty('--i', PDF_STYLES.indexOf(bill.pdfStyle)); // slides the thumb
-  for (const b of styleSeg.children) b.setAttribute('aria-pressed', String(b.dataset.style === bill.pdfStyle));
+// Which PDF, asked when one is actually wanted. Whatever was picked last time
+// leads, so the answer is usually the same tap in the same place.
+const ask = $('ask');
+let picked = null; // what to do once a setting has been chosen
+function askStyle(then) {
+  picked = then;
+  for (const b of ask.querySelectorAll('[data-style]')) {
+    b.setAttribute('aria-pressed', String(b.dataset.style === bill.pdfStyle));
+  }
+  ask.showModal();
 }
-styleSeg.onclick = (e) => {
-  const v = e.target.closest('button')?.dataset.style;
-  if (!v || v === bill.pdfStyle) return;
-  bill.pdfStyle = v; save(); renderPdfStyle();
-};
+for (const b of ask.querySelectorAll('[data-style]')) {
+  b.onclick = () => {
+    if (bill.pdfStyle !== b.dataset.style) { bill.pdfStyle = b.dataset.style; save(); }
+    const go = picked;
+    picked = null;
+    ask.close();
+    // Straight on, in the same tap: the share sheet only opens while the
+    // gesture that asked for it is still live.
+    go?.();
+  };
+}
+$('askClose').onclick = () => { picked = null; ask.close(); };
+ask.oncancel = () => { picked = null; }; // Esc, which closes the dialog by itself
 
-function renderAll() { renderPeople(); renderItems(); renderSummary(); renderPhoto(); renderPays(); renderPdfStyle(); renderBills(); }
+function renderAll() { renderPeople(); renderItems(); renderSummary(); renderPhoto(); renderPays(); renderBills(); }
 renderAll();
 
 // --- PDF -------------------------------------------------------------------
@@ -1588,7 +1625,7 @@ async function sharePdf() {
     alert(`The PDF couldn't be sent. ${e.message} You can still send the message on its own.`);
   }
 }
-$('pdf').onclick = sharePdf;
+$('pdf').onclick = () => askStyle(sharePdf);
 
 // The same bill as a spreadsheet, for your own offline history. CSV opens in
 // Excel and Sheets and stays readable in a plain text editor; the BOM is what
