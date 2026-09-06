@@ -219,7 +219,7 @@
     <h2>Participants</h2>
     <div id="people"></div>
     <button id="addPerson">+ Add participant</button>
-    <p class="hint" style="margin-top:8px">Phone is optional — leave it blank and WhatsApp will ask you who to send to. Tick the box to mark who paid the whole bill up front. 📄 sends the PDF into the chat after the message, 📋 copies that message to paste under it.</p>
+    <p class="hint" style="margin-top:8px">Phone is optional — leave it blank and WhatsApp will ask you who to send to. Tick the box to mark who paid the whole bill up front. 📄 sends the PDF into the chat and copies the message ready to paste under it; 📋 copies that message on its own.</p>
   </section>
 
   <section>
@@ -959,25 +959,33 @@ function renderSummary() {
       title: payer ? 'Send them who owes what' : bill.phones[p.name] ? `Send to ${bill.phones[p.name]}` : 'Pick the contact in WhatsApp',
       onclick: () => window.open(waLink(bill.phones[p.name], messageFor(p)), '_blank', 'noopener'),
     });
-    // Second tap, same row: the sheet hands the PDF to whichever chat you like.
-    // Hidden where a file cannot be shared at all — the button at the foot of
-    // the page downloads the same PDF there.
-    const doc = CAN_SHARE_FILE ? el('button', {
-      className: 'wa', textContent: '📄',
-      title: `Attach the PDF in ${p.name}'s chat`,
-      onclick: () => sharePdf(),
-    }) : null;
     // Their message on the clipboard. The share sheet leaves you in the chat
     // with a document and no caption — this is the words that go under it, and
     // it is also how you send from WhatsApp Web, which takes no link.
     const copy = el('button', {
       className: 'wa', textContent: '📋', title: `Copy ${p.name}'s message`,
-      onclick: async () => {
-        try { await navigator.clipboard.writeText(messageFor(p)); copy.textContent = '✓'; }
-        catch { copy.textContent = '✕'; } // no clipboard without https, and none to fake it with
-        setTimeout(() => { copy.textContent = '📋'; }, 1400);
-      },
+      onclick: () => copyMessage(),
     });
+    const mark = (ok) => {
+      copy.textContent = ok ? '✓' : '✕';
+      setTimeout(() => { copy.textContent = '📋'; }, 1400);
+    };
+    // Never throws and never awaits: it is called on the way into the share
+    // sheet, which only opens while the tap is still live.
+    const copyMessage = () => {
+      const done = navigator.clipboard?.writeText(messageFor(p)); // no clipboard without https
+      if (!done) return mark(false);
+      done.then(() => mark(true), () => mark(false));
+    };
+    // Second tap, same row: the sheet hands the PDF to whichever chat you like,
+    // and takes the message with it as far as the clipboard, since WhatsApp
+    // will not carry it any further. Hidden where a file cannot be shared at
+    // all — the button at the foot of the page downloads the same PDF there.
+    const doc = CAN_SHARE_FILE ? el('button', {
+      className: 'wa', textContent: '📄',
+      title: `Attach the PDF in ${p.name}'s chat, message copied ready to paste`,
+      onclick: () => { copyMessage(); sharePdf(); },
+    }) : null;
     const right = el('div', { style: 'text-align:right; white-space:nowrap' }, [
       el('div', {}, [el('b', { textContent: `Rp ${money(p.total)}` })]),
       payer ? el('div', { className: 'hint', textContent: `gets back Rp ${money(collect(result, p.name).due)}` }) : null,
