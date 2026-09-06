@@ -219,7 +219,7 @@
     <h2>Participants</h2>
     <div id="people"></div>
     <button id="addPerson">+ Add participant</button>
-    <p class="hint" style="margin-top:8px">Phone is optional — leave it blank and WhatsApp will ask you who to send to. Tick the box to mark who paid the whole bill up front. 📄 sends the PDF into the chat after the message.</p>
+    <p class="hint" style="margin-top:8px">Phone is optional — leave it blank and WhatsApp will ask you who to send to. Tick the box to mark who paid the whole bill up front. 📄 sends the PDF into the chat after the message, 📋 copies that message to paste under it.</p>
   </section>
 
   <section>
@@ -967,10 +967,21 @@ function renderSummary() {
       title: `Attach the PDF in ${p.name}'s chat`,
       onclick: () => sharePdf(),
     }) : null;
+    // Their message on the clipboard. The share sheet leaves you in the chat
+    // with a document and no caption — this is the words that go under it, and
+    // it is also how you send from WhatsApp Web, which takes no link.
+    const copy = el('button', {
+      className: 'wa', textContent: '📋', title: `Copy ${p.name}'s message`,
+      onclick: async () => {
+        try { await navigator.clipboard.writeText(messageFor(p)); copy.textContent = '✓'; }
+        catch { copy.textContent = '✕'; } // no clipboard without https, and none to fake it with
+        setTimeout(() => { copy.textContent = '📋'; }, 1400);
+      },
+    });
     const right = el('div', { style: 'text-align:right; white-space:nowrap' }, [
       el('div', {}, [el('b', { textContent: `Rp ${money(p.total)}` })]),
       payer ? el('div', { className: 'hint', textContent: `gets back Rp ${money(collect(result, p.name).due)}` }) : null,
-      el('div', { style: 'margin-top:6px; display:flex; gap:6px; justify-content:flex-end' }, [wa, doc]),
+      el('div', { style: 'margin-top:6px; display:flex; gap:6px; justify-content:flex-end' }, [wa, copy, doc]),
     ]);
     box.append(el('div', { className: 'share' }, [left, right]));
   }
