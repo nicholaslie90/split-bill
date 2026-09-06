@@ -219,7 +219,7 @@
     <h2>Participants</h2>
     <div id="people"></div>
     <button id="addPerson">+ Add participant</button>
-    <p class="hint" style="margin-top:8px">Phone is optional — leave it blank and WhatsApp will ask you who to send to. Tick the box to mark who paid the whole bill up front.</p>
+    <p class="hint" style="margin-top:8px">Phone is optional — leave it blank and WhatsApp will ask you who to send to. On a phone it asks anyway, because that is the only way the PDF can go with the message. Tick the box to mark who paid the whole bill up front.</p>
   </section>
 
   <section>
@@ -924,6 +924,31 @@ function messageFor(p) {
   ].join('\n');
 }
 
+// WhatsApp only takes an attachment through the OS share sheet, and the share
+// sheet insists on choosing the recipient itself. So a phone that can hand a
+// file to another app gets the PDF, at the cost of picking the contact by hand;
+// everything else keeps the wa.me link with the number already dialled in.
+// Either way the same message goes with it, as the caption where WhatsApp
+// keeps one and in the box where it doesn't.
+const CAN_SHARE_FILE = (() => {
+  try { return navigator.canShare?.({ files: [new File([''], 'a.pdf', { type: 'application/pdf' })] }) ?? false; }
+  catch { return false; } // older Safari throws on a File it doesn't like
+})();
+
+function sendWhatsApp(p) {
+  const text = messageFor(p);
+  const link = () => window.open(waLink(bill.phones[p.name], text), '_blank', 'noopener');
+  if (!CAN_SHARE_FILE) return link();
+  let file;
+  // Synchronous all the way to share(): an await before it spends the tap on
+  // Safari, and the sheet only opens while the tap is still live.
+  try { file = new File([buildPdf().output('blob')], fileName('pdf'), { type: 'application/pdf' }); }
+  catch { return link(); } // PDF library blocked, or a photo jsPDF won't take
+  if (!navigator.canShare({ files: [file] })) return link(); // too big to share
+  navigator.share({ files: [file], text, title: label() })
+    .catch((e) => { if (e.name !== 'AbortError') link(); });
+}
+
 function renderSummary() {
   result = calcShares(bill);
   const box = $('summary');
@@ -940,10 +965,14 @@ function renderSummary() {
       left.append(el('ul', {}, p.lines.map((l) =>
         el('li', { textContent: `${l.name || 'Item'} — ${money(l.share)}${shareLabel(l) ? ` (${shareLabel(l)})` : ''}` }))));
     }
+    // The ellipsis is the promise that there is another step: with the PDF
+    // attached there always is, because the sheet asks who it goes to.
     const wa = el('button', {
-      className: 'wa', textContent: bill.phones[p.name] ? '▸ WhatsApp' : '▸ WhatsApp…',
-      title: payer ? 'Send them who owes what' : bill.phones[p.name] ? `Send to ${bill.phones[p.name]}` : 'Pick the contact in WhatsApp',
-      onclick: () => window.open(waLink(bill.phones[p.name], messageFor(p)), '_blank', 'noopener'),
+      className: 'wa', textContent: !CAN_SHARE_FILE && bill.phones[p.name] ? '▸ WhatsApp' : '▸ WhatsApp…',
+      title: CAN_SHARE_FILE
+        ? `Attach the PDF, then pick ${p.name} in WhatsApp`
+        : payer ? 'Send them who owes what' : bill.phones[p.name] ? `Send to ${bill.phones[p.name]}` : 'Pick the contact in WhatsApp',
+      onclick: () => sendWhatsApp(p),
     });
     const right = el('div', { style: 'text-align:right; white-space:nowrap' }, [
       el('div', {}, [el('b', { textContent: `Rp ${money(p.total)}` })]),
