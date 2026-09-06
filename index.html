@@ -40,6 +40,11 @@
     --accent-ink: light-dark(#fff, #04211d);
     --chip: light-dark(#eef1f4, #222834);
     --danger: light-dark(#b42318, #fda29b);
+    /* WhatsApp's own two greens. Borrowed, not invented: the mark is only
+       worth using icon-only because it is already the most recognised thing
+       on the phone this runs on. */
+    --wa: light-dark(#1fa855, #25d366);
+    --wa-fill: light-dark(#128c7e, #17a08f);
     --veil: light-dark(rgba(246, 247, 249, .78), rgba(14, 17, 22, .78));
     --shadow: 0 1px 2px light-dark(rgba(16, 24, 40, .05), rgba(0, 0, 0, .35)),
               0 8px 22px light-dark(rgba(16, 24, 40, .05), rgba(0, 0, 0, .25));
@@ -123,7 +128,36 @@
     font-weight: 600; box-shadow: var(--shadow);
   }
   button.icon { flex: 0 0 auto; padding: 10px 11px; color: var(--danger); }
-  button.wa { flex: 0 0 auto; font-size: 13px; padding: 7px 11px; }
+  /* The send buttons. Icon only, and 44px at the smallest, because this is
+     tapped standing up, one-handed, once for every person at the table. Solid
+     for the message everyone gets; outlined, and one glyph wider, for the one
+     that carries the file — a paperclip says it without a word of label. */
+  button.wa {
+    flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
+    gap: 5px; min-width: 44px; min-height: 44px; padding: 0 11px; color: var(--wa);
+  }
+  button.wa svg { display: block; }
+  button.wa svg + svg { color: var(--muted); }
+  button.wa.bad { color: var(--danger); }
+  /* Sent already. A tick beside the name rather than a dimmed row: greying out
+     a row would take every figure on it below readable contrast. */
+  button.tick {
+    padding: 0; border: 0; background: none; color: var(--accent);
+    min-width: 24px; min-height: 24px; margin-right: 3px;
+    display: inline-flex; vertical-align: -5px;
+  }
+  /* inline-flex outranks the UA's [hidden] rule, so say it here or an unsent
+     row wears a tick anyway. */
+  button.tick[hidden] { display: none; }
+  button.wa.send {
+    background: var(--wa-fill); border-color: transparent; color: #fff;
+    box-shadow: var(--shadow);
+  }
+  /* Announcements for screen readers only — the copy tick is a picture. */
+  .sr {
+    position: absolute; width: 1px; height: 1px; margin: -1px;
+    overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+  }
 
   /* Theme switch: three labels, one sliding thumb driven by --i. */
   .seg { position: relative; display: flex; padding: 3px; border-radius: 999px; background: var(--chip); }
@@ -219,7 +253,7 @@
     <h2>Participants</h2>
     <div id="people"></div>
     <button id="addPerson">+ Add participant</button>
-    <p class="hint" style="margin-top:8px">Phone is optional — leave it blank and WhatsApp will ask you who to send to. Tick the box to mark who paid the whole bill up front. 📄 sends the PDF into the chat and copies the message ready to paste under it; 📋 copies that message on its own.</p>
+    <p class="hint" style="margin-top:8px">Phone is optional — leave it blank and WhatsApp will ask you who to send to. Tick the box to mark who paid the whole bill up front. Each person then gets two buttons: the message on its own, or the message and the bill as a PDF.</p>
   </section>
 
   <section>
@@ -312,6 +346,7 @@
   <section>
     <h2>Who pays what</h2>
     <div id="summary"></div>
+    <p id="say" class="sr" role="status" aria-live="polite"></p>
     <div class="row" style="margin-top:16px; align-items:center">
       <span class="hint" id="styleLabel" style="flex:0 0 auto">PDF style</span>
       <div class="seg" id="pdfStyle" role="group" aria-labelledby="styleLabel" style="--n:2; flex:0 1 230px">
@@ -341,7 +376,7 @@
 // The ?v= is not decoration: this page and split.js are cached separately, so a
 // browser holding yesterday's split.js while loading today's page would fail to
 // import and leave every button dead. Bump it whenever split.js gains an export.
-import { calcShares, collect, digits, fmtDate, group, money, parseGemini, parseReceipt, setMoneySeparator, shareLabel, sharedByLabel, toCsv, waLink } from './split.js?v=5';
+import { calcShares, collect, digits, fmtDate, group, money, parseGemini, parseReceipt, setMoneySeparator, shareLabel, sharedByLabel, toCsv, waLink } from './split.js?v=6';
 
 const KEY = 'split-bill';
 const $ = (id) => document.getElementById(id);
@@ -361,7 +396,7 @@ const blank = () => ({
   participants: [], phones: {}, paidBy: '', items: [], photo: '',
   servicePct: 5, serviceAmt: '', taxPct: 11, taxAmt: '', taxOnService: true,
   discount: '', discountPct: '', roundTo: 0,
-  pay: [], pdfStyle: 'beautiful',
+  pay: [], pdfStyle: 'beautiful', sent: [],
 });
 
 const FIELDS = [['title', 'title'], ['date', 'date'],
@@ -384,6 +419,9 @@ bill.items = (Array.isArray(bill.items) ? bill.items : []).map((it) => ({
   sharedBy: Array.isArray(it.sharedBy) ? it.sharedBy.map(String) : [],
 }));
 for (const k of ['serviceAmt', 'taxAmt', 'discount']) bill[k] = rupiah(bill[k]);
+// Who has already had theirs. Kept to people who are still on the bill, so a
+// name that was removed or renamed elsewhere can't leave a mark behind.
+bill.sent = (Array.isArray(bill.sent) ? bill.sent : []).map(String).filter((n) => bill.participants.includes(n));
 if (!PDF_STYLES.includes(bill.pdfStyle)) bill.pdfStyle = 'beautiful';
 
 // One account used to live in three fields on the bill; now there is a list of
@@ -520,6 +558,7 @@ function renderPeople() {
       delete bill.phones[name];
       if (phone) bill.phones[next] = phone;
       if (bill.paidBy === name) bill.paidBy = next;
+      bill.sent = bill.sent.map((n) => (n === name ? next : n));
       bill.items.forEach((it) => { it.sharedBy = it.sharedBy.map((p) => (p === name ? next : p)); });
       bill.participants[i] = next;
       save(); renderAll();
@@ -543,6 +582,7 @@ function renderPeople() {
         bill.participants.splice(i, 1);
         delete bill.phones[name];
         if (bill.paidBy === name) bill.paidBy = '';
+        bill.sent = bill.sent.filter((n) => n !== name);
         bill.items.forEach((it) => { it.sharedBy = it.sharedBy.filter((p) => p !== name); });
         save(); renderAll();
       },
@@ -707,7 +747,10 @@ function flatten(shot) {
 // The key lives in its own storage slot, never in `bill`: otherwise "Start
 // over" would wipe it, and every CSV, PDF and WhatsApp message would carry it.
 const KEY_SLOT = 'split-bill-gemini-key';
-const geminiKey = () => (localStorage.getItem(KEY_SLOT) || '').trim();
+// The box wins over the slot. A password manager can fill a field without ever
+// firing `input`, and a key you can see in front of you that the scan then
+// ignores is the worst kind of silence — the reading just quietly goes local.
+const geminiKey = () => ($('geminiKey')?.value || localStorage.getItem(KEY_SLOT) || '').trim();
 
 // The standing caveat is not standing any more — with a key the photo leaves
 // the device, and saying otherwise on the one screen where it matters would be
@@ -773,7 +816,14 @@ async function readWithGemini(shot) {
   const body = await res.json();
   const text = body?.candidates?.[0]?.content?.parts?.map((x) => x.text).filter(Boolean).join('') ?? '';
   try { return parseGemini(JSON.parse(text)); }
-  catch { throw new Error('Gemini sent back something that was not a receipt.'); }
+  catch {
+    // Say what came back instead. "Not a receipt" on its own leaves nothing to
+    // act on; the finish reason names the usual culprits — a filtered image, a
+    // reply cut off mid-JSON — and the first words of the answer name the rest.
+    const why = body?.candidates?.[0]?.finishReason;
+    throw new Error(`Gemini sent back something that was not a receipt${why && why !== 'STOP' ? ` (${why})` : ''}.`
+      + (text ? ` It said: ${text.slice(0, 120)}` : ' It said nothing at all.'));
+  }
 }
 
 // Two ways in — the camera or a photo already on the device — and one pipeline
@@ -858,10 +908,14 @@ async function scanFile(file) {
     const kept = save();
     renderAll();
     const read = items.reduce((a, it) => a + it.amount, 0);
+    // Which of the two read it, every time. Without this line a scan that fell
+    // back to the local reader — a key that never saved, a field a password
+    // manager filled silently — looks exactly like Gemini doing a bad job.
+    const reader = geminiKey() ? 'Gemini' : 'the reader on your device';
     note([
       items.length
-        ? `Added ${items.length} item${items.length > 1 ? 's' : ''}, Rp ${money(read)} in total.`
-        : `Couldn't make out any item lines — add them by hand.`,
+        ? `${geminiKey() ? 'Gemini' : 'Your device'} added ${items.length} item${items.length > 1 ? 's' : ''}, Rp ${money(read)} in total.`
+        : `Nothing came back from ${reader} — no item lines it could make out, so add them by hand.`,
       total ? `The struk says its total is Rp ${money(total)} — service, tax and discount make up the difference.` : '',
       kept ? 'The photo goes at the foot of the PDF.' : 'The photo was too big to keep, so the PDF goes without it.',
       KEEP(),
@@ -938,6 +992,29 @@ const CAN_SHARE_FILE = (() => {
 // between spends it.
 const pdfFile = () => new File([buildPdf().output('blob')], fileName('pdf'), { type: 'application/pdf' });
 
+// Drawn icons on one 24 grid at one stroke weight, rather than emoji: an emoji
+// is whatever face the phone happens to ship, at whatever size it likes, and
+// a screen reader reads it out as "page facing up".
+const svg = (inner) => `<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false">${inner}</svg>`;
+const LINE = 'fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"';
+// WhatsApp's own mark (Simple Icons). The one glyph on this screen that needs
+// no label: it is the app the message is going to.
+const WA = svg('<path fill="currentColor" d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413Z"/>');
+const CLIP = svg(`<path ${LINE} d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>`);
+const COPY = svg(`<g ${LINE}><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></g>`);
+const TICK = svg(`<path ${LINE} d="M20 6L9 17l-5-5"/>`);
+const CROSS = svg(`<path ${LINE} d="M18 6L6 18M6 6l12 12"/>`);
+
+// A button carrying a picture has to say what it is out loud. The label is the
+// accessible name and the desktop tooltip both; the glyph is for the eye only.
+const iconButton = (className, glyphs, label, onclick) => {
+  const b = el('button', { className, title: label, onclick, innerHTML: glyphs });
+  b.setAttribute('aria-label', label);
+  return b;
+};
+// What the tick and the cross mean, for anyone who cannot see them.
+const say = (words) => { $('say').textContent = words; };
+
 function renderSummary() {
   result = calcShares(bill);
   const box = $('summary');
@@ -946,53 +1023,83 @@ function renderSummary() {
     box.append(el('p', { className: 'hint', textContent: 'Add participants and items to see the split.' }));
     return;
   }
+  // Place-keeping for the chase. Five people, a reply lands halfway through,
+  // and you are back at the top wondering who you already did — so a tick
+  // stays beside anyone who has had theirs, and a line above the list says how
+  // far along you are. It is per bill, it survives a reload, and "Start over"
+  // clears it with everything else.
+  const counter = el('p', { className: 'hint', style: 'margin: 0 0 12px' });
+  box.append(counter);
+  const renderSent = () => {
+    const n = result.people.filter((x) => bill.sent.includes(x.name)).length;
+    counter.hidden = !n;
+    counter.textContent = n === result.people.length
+      ? `Sent to all ${n} — everyone has theirs.`
+      : `Sent ${n} of ${result.people.length}.`;
+  };
+
   for (const p of result.people) {
     const payer = p.name === bill.paidBy;
-    const left = el('div', {}, [el('b', { textContent: p.name })]);
+    // The tick is the mark and the way out of it: a mis-tap that says "sent"
+    // has to be undoable, or the count lies for the rest of the evening.
+    const tick = iconButton('tick', TICK, `${p.name} has had theirs — clear this mark`, () => {
+      bill.sent = bill.sent.filter((n) => n !== p.name);
+      save(); tick.hidden = true; renderSent();
+    });
+    tick.hidden = !bill.sent.includes(p.name);
+    const sent = () => {
+      if (!bill.sent.includes(p.name)) { bill.sent = [...bill.sent, p.name]; save(); }
+      tick.hidden = false;
+      renderSent();
+    };
+    const left = el('div', {}, [tick, el('b', { textContent: p.name })]);
     if (payer) left.append(el('span', { className: 'hint', textContent: ' · paid up front' }));
     if (p.lines.length) {
       left.append(el('ul', {}, p.lines.map((l) =>
         el('li', { textContent: `${l.name || 'Item'} — ${money(l.share)}${shareLabel(l) ? ` (${shareLabel(l)})` : ''}` }))));
     }
-    const wa = el('button', {
-      className: 'wa', textContent: bill.phones[p.name] ? '▸ WhatsApp' : '▸ WhatsApp…',
-      title: payer ? 'Send them who owes what' : bill.phones[p.name] ? `Send to ${bill.phones[p.name]}` : 'Pick the contact in WhatsApp',
-      onclick: () => window.open(waLink(bill.phones[p.name], messageFor(p)), '_blank', 'noopener'),
-    });
-    // Their message on the clipboard. The share sheet leaves you in the chat
-    // with a document and no caption — this is the words that go under it, and
-    // it is also how you send from WhatsApp Web, which takes no link.
-    const copy = el('button', {
-      className: 'wa', textContent: '📋', title: `Copy ${p.name}'s message`,
-      onclick: () => copyMessage(),
-    });
-    const mark = (ok) => {
-      copy.textContent = ok ? '✓' : '✕';
-      setTimeout(() => { copy.textContent = '📋'; }, 1400);
+    // Two ways to send, and no third. The message alone, straight to their
+    // number — that is the everyday one, so it is the solid button. Or the
+    // message and the bill as a file, which WhatsApp will only take through
+    // the share sheet, and which arrives there with its caption stripped: so
+    // the words go to the clipboard on the way past, ready to paste under it.
+    const what = payer ? `what ${p.name} gets back` : `${p.name} their share`;
+    const send = iconButton('wa send', WA,
+      bill.phones[p.name] ? `Send ${what} on WhatsApp` : `Send ${what} on WhatsApp — pick the contact there`,
+      () => { window.open(waLink(bill.phones[p.name], messageFor(p)), '_blank', 'noopener'); sent(); });
+
+    const mark = (ok, words) => {
+      withFile.innerHTML = (ok ? TICK : CROSS) + (CAN_SHARE_FILE ? CLIP : '');
+      withFile.classList.toggle('bad', !ok);
+      say(words);
+      setTimeout(() => {
+        withFile.innerHTML = CAN_SHARE_FILE ? WA + CLIP : COPY;
+        withFile.classList.remove('bad');
+      }, 1400);
     };
     // Never throws and never awaits: it is called on the way into the share
     // sheet, which only opens while the tap is still live.
     const copyMessage = () => {
       const done = navigator.clipboard?.writeText(messageFor(p)); // no clipboard without https
-      if (!done) return mark(false);
-      done.then(() => mark(true), () => mark(false));
+      if (!done) return mark(false, 'No clipboard in this browser.');
+      done.then(() => mark(true, `${p.name}'s message copied.`), () => mark(false, 'Could not copy the message.'));
     };
-    // Second tap, same row: the sheet hands the PDF to whichever chat you like,
-    // and takes the message with it as far as the clipboard, since WhatsApp
-    // will not carry it any further. Hidden where a file cannot be shared at
-    // all — the button at the foot of the page downloads the same PDF there.
-    const doc = CAN_SHARE_FILE ? el('button', {
-      className: 'wa', textContent: '📄',
-      title: `Attach the PDF in ${p.name}'s chat, message copied ready to paste`,
-      onclick: () => { copyMessage(); sharePdf(); },
-    }) : null;
+    // Where no file can be shared — a desktop browser, mostly — the same
+    // button copies the message instead, which is how you send from WhatsApp
+    // Web, and the PDF button at the foot of the page saves the file.
+    const withFile = CAN_SHARE_FILE
+      ? iconButton('wa', WA + CLIP, `Send ${what} on WhatsApp with the bill attached — the message is copied, ready to paste under it`,
+          () => { copyMessage(); sharePdf(); sent(); })
+      : iconButton('wa', COPY, `Copy ${p.name}'s message`, () => copyMessage());
+
     const right = el('div', { style: 'text-align:right; white-space:nowrap' }, [
       el('div', {}, [el('b', { textContent: `Rp ${money(p.total)}` })]),
       payer ? el('div', { className: 'hint', textContent: `gets back Rp ${money(collect(result, p.name).due)}` }) : null,
-      el('div', { style: 'margin-top:6px; display:flex; gap:6px; justify-content:flex-end' }, [wa, copy, doc]),
+      el('div', { style: 'margin-top:6px; display:flex; gap:6px; justify-content:flex-end' }, [send, withFile]),
     ]);
     box.append(el('div', { className: 'share' }, [left, right]));
   }
+  renderSent();
   const t = el('div', { className: 'totals' });
   t.append(el('div', {}, [el('span', { textContent: 'Subtotal' }), el('span', { textContent: `Rp ${money(result.subtotal)}` })]));
   if (result.service) t.append(el('div', {}, [el('span', { textContent: chargeLabel('Service', bill.servicePct) }), el('span', { textContent: `Rp ${money(result.service)}` })]));
@@ -1348,7 +1455,8 @@ async function sharePdf() {
   try {
     await deliver(pdfFile());
   } catch (e) {
-    alert(e.message);
+    // Whatever went wrong, there is always a way to send the numbers anyway.
+    alert(`The PDF couldn't be sent. ${e.message} You can still send the message on its own.`);
   }
 }
 $('pdf').onclick = sharePdf;
