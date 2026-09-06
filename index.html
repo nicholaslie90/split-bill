@@ -76,9 +76,6 @@
   }
   .bar.lifted { border-bottom-color: var(--line); }
   .bar > div { display: flex; align-items: center; gap: 9px; }
-  /* Throwing the bill away is not one of the day's main verbs. */
-  button.quiet { background: none; border-color: transparent; color: var(--muted); }
-  button.quiet:hover { color: var(--danger); }
 
   .logo { flex: 0 0 auto; color: var(--accent); }
   h1 { font-size: 17px; margin: 0; letter-spacing: -0.02em; flex: 1; }
@@ -361,9 +358,17 @@
     </div>
   </section>
 
-  <p style="text-align:center; margin:0 0 6px">
-    <button id="reset" class="quiet">Start over</button>
-  </p>
+  <section>
+    <h2>Bills</h2>
+    <div id="bills"></div>
+    <div class="row" style="margin-top:12px"><button id="billNew">+ New bill</button></div>
+    <div class="row" style="margin-top:8px">
+      <button id="billOpen">Open a file…</button>
+      <button id="billSave">Save as file</button>
+    </div>
+    <input id="billFile" type="file" accept="application/json,.json" hidden>
+    <p class="hint" style="margin-top:6px">Every bill here stays in this browser. Saving one as a file is how it moves to another phone, or how you keep it after this browser forgets.</p>
+  </section>
 
   <footer>Everything stays in this browser. Nothing is uploaded.</footer>
 </main>
@@ -391,7 +396,13 @@ function el(tag, props = {}, kids = []) {
 // Two ways to set the same numbers: tight enough to file, or given room.
 const PDF_STYLES = ['organised', 'beautiful'];
 
+// A bill needs a name of its own the moment there is more than one of them.
+// Local and disposable: it never leaves this browser except inside a file the
+// user saved themselves.
+const newId = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+
 const blank = () => ({
+  id: newId(),
   title: '', date: new Date().toISOString().slice(0, 10),
   participants: [], phones: {}, paidBy: '', items: [], photo: '',
   servicePct: 5, serviceAmt: '', taxPct: 11, taxAmt: '', taxOnService: true,
@@ -405,44 +416,58 @@ const FIELDS = [['title', 'title'], ['date', 'date'],
                 ['disc', 'discount'], ['discPct', 'discountPct'], ['roundTo', 'roundTo'],
                 ];
 
-let bill;
-try { bill = { ...blank(), ...JSON.parse(localStorage.getItem(KEY) || '{}') }; }
-catch { bill = blank(); }
-// Stored JSON is untrusted — an item without a sharedBy array, or a duplicate
-// name, would break the split. Normalise once instead of guarding everywhere.
-bill.participants = [...new Set((Array.isArray(bill.participants) ? bill.participants : []).map(String))];
 // Money fields hold whole-rupiah digit strings. A stored decimal has to be rounded
 // on the way in, or reading it as digits would turn 1142.51 into 114.251.
 const rupiah = (v) => (v === '' || v == null ? '' : String(Math.max(0, Math.round(Number(v) || 0))));
-bill.items = (Array.isArray(bill.items) ? bill.items : []).map((it) => ({
-  name: '', ...it, amount: rupiah(it.amount),
-  sharedBy: Array.isArray(it.sharedBy) ? it.sharedBy.map(String) : [],
-}));
-for (const k of ['serviceAmt', 'taxAmt', 'discount']) bill[k] = rupiah(bill[k]);
-// Who has already had theirs. Kept to people who are still on the bill, so a
-// name that was removed or renamed elsewhere can't leave a mark behind.
-bill.sent = (Array.isArray(bill.sent) ? bill.sent : []).map(String).filter((n) => bill.participants.includes(n));
-if (!PDF_STYLES.includes(bill.pdfStyle)) bill.pdfStyle = 'beautiful';
+const pct = (v) => (v === '' || v == null ? '' : String(Math.min(100, Math.max(0, Number(v) || 0))));
 
-// One account used to live in three fields on the bill; now there is a list of
-// them. Carry the old one over rather than dropping somebody's saved details.
-bill.pay = (Array.isArray(bill.pay) ? bill.pay : []).map((a) => ({
-  bank: String(a?.bank ?? '').slice(0, 30),
-  acct: String(a?.acct ?? '').slice(0, 34),
-  name: String(a?.name ?? '').slice(0, 60),
-}));
-if (!bill.pay.length && (bill.payBank || bill.payAcct || bill.payName)) {
-  bill.pay = [{ bank: bill.payBank ?? '', acct: bill.payAcct ?? '', name: bill.payName ?? '' }];
+// Every bill comes in through here — out of storage, off the shelf, or out of
+// a file somebody sent. All three are untrusted: an item without a sharedBy
+// array, a duplicate name or a percentage that isn't a number would break the
+// split. Normalise once instead of guarding everywhere.
+function clean(raw) {
+  const b = { ...blank(), ...(raw && typeof raw === 'object' ? raw : {}) };
+  b.id = String(b.id ?? '').slice(0, 40) || newId();
+  b.title = String(b.title ?? '').slice(0, 80);
+  b.date = /^\d{4}-\d{2}-\d{2}$/.test(b.date) ? b.date : '';
+  b.participants = [...new Set((Array.isArray(b.participants) ? b.participants : []).map((n) => String(n).slice(0, 40)))];
+  b.items = (Array.isArray(b.items) ? b.items : []).slice(0, 400).map((it) => ({
+    ...it, name: String(it?.name ?? '').slice(0, 120), amount: rupiah(it?.amount),
+    sharedBy: Array.isArray(it?.sharedBy) ? it.sharedBy.map(String) : [],
+  }));
+  for (const k of ['serviceAmt', 'taxAmt', 'discount']) b[k] = rupiah(b[k]);
+  for (const k of ['servicePct', 'taxPct', 'discountPct']) b[k] = pct(b[k]);
+  b.roundTo = Number(b.roundTo) || 0;
+  // Who has already had theirs. Kept to people who are still on the bill, so a
+  // name that was removed or renamed elsewhere can't leave a mark behind.
+  b.sent = (Array.isArray(b.sent) ? b.sent : []).map(String).filter((n) => b.participants.includes(n));
+  if (!PDF_STYLES.includes(b.pdfStyle)) b.pdfStyle = 'beautiful';
+
+  // One account used to live in three fields on the bill; now there is a list of
+  // them. Carry the old one over rather than dropping somebody's saved details.
+  b.pay = (Array.isArray(b.pay) ? b.pay : []).slice(0, 20).map((a) => ({
+    bank: String(a?.bank ?? '').slice(0, 30),
+    acct: String(a?.acct ?? '').slice(0, 34),
+    name: String(a?.name ?? '').slice(0, 60),
+  }));
+  if (!b.pay.length && (b.payBank || b.payAcct || b.payName)) {
+    b.pay = [{ bank: b.payBank ?? '', acct: b.payAcct ?? '', name: b.payName ?? '' }];
+  }
+  delete b.payBank; delete b.payAcct; delete b.payName;
+
+  // The struk photo is a data URL out of storage and ends up inside a PDF, so
+  // only a JPEG this app could have written itself is allowed through.
+  b.photo = /^data:image\/jpeg;base64,[A-Za-z0-9+/]+=*$/.test(b.photo) && b.photo.length < 4e6 ? b.photo : '';
+  b.phones = b.phones && typeof b.phones === 'object' ? b.phones : {};
+  for (const k of Object.keys(b.phones)) b.phones[k] = String(b.phones[k] ?? '').slice(0, 24);
+  // Only a current participant can be the one who fronted the bill.
+  if (!b.participants.includes(b.paidBy)) b.paidBy = '';
+  return b;
 }
-delete bill.payBank; delete bill.payAcct; delete bill.payName;
 
-// The struk photo is a data URL out of storage and ends up inside a PDF, so
-// only a JPEG this app could have written itself is allowed through.
-bill.photo = /^data:image\/jpeg;base64,[A-Za-z0-9+/]+=*$/.test(bill.photo) && bill.photo.length < 4e6
-  ? bill.photo : '';
-if (!bill.phones || typeof bill.phones !== 'object') bill.phones = {};
-// Only a current participant can be the one who fronted the bill.
-if (!bill.participants.includes(bill.paidBy)) bill.paidBy = '';
+let bill;
+try { bill = clean(JSON.parse(localStorage.getItem(KEY) || '{}')); }
+catch { bill = clean(); }
 
 // Returns false when the struk photo had to be dropped to make the bill fit.
 // Everything else here is a few kilobytes; the photo is the only thing that can
@@ -454,6 +479,110 @@ const save = () => {
     bill.photo = '';
     localStorage.setItem(KEY, JSON.stringify(bill));
     return false;
+  }
+};
+
+// --- the other bills --------------------------------------------------------
+// The open bill stays exactly where it has always been, in KEY, so nothing
+// about saving it changes. The rest wait on the shelf, and switching is a swap
+// between the two. Next restaurant, next bill; last week's is still here.
+const SHELF = 'split-bill-shelf';
+const MAX_SHELF = 30;
+let shelf;
+try {
+  const list = JSON.parse(localStorage.getItem(SHELF) || '[]');
+  shelf = (Array.isArray(list) ? list : []).slice(0, MAX_SHELF).map(clean);
+} catch { shelf = []; }
+
+// A photo is the only thing here big enough to fill localStorage, and a bill
+// you are not looking at needs its numbers, not its picture. So the oldest
+// shelved photo goes first, then the next, and only when every one of them is
+// gone does the write admit there is no room.
+const writeShelf = () => {
+  const copy = shelf.map((b) => ({ ...b }));
+  for (let left = copy.length; ; left--) {
+    try { localStorage.setItem(SHELF, JSON.stringify(copy)); shelf = copy; return; }
+    catch {
+      if (left <= 0) throw new Error('There is no room left to keep another bill — delete one first.');
+      copy[left - 1].photo = '';
+    }
+  }
+};
+
+// A bill nobody has typed anything into is not worth keeping.
+const isBlank = (b) => !b.title.trim() && !b.items.length && !b.participants.length && !b.photo;
+
+// Swap the open bill for another one. Whatever was open goes to the front of
+// the shelf on the way past, so switching never costs you anything.
+function loadBill(next) {
+  if (!isBlank(bill)) shelf = [bill, ...shelf].slice(0, MAX_SHELF);
+  shelf = shelf.filter((b) => b.id !== next.id);
+  writeShelf();
+  bill = next;
+  save();
+  paintFields();
+  $('tos').checked = bill.taxOnService !== false;
+  renderAll();
+}
+
+function renderBills() {
+  const box = $('bills');
+  box.textContent = '';
+  for (const b of [bill, ...shelf]) {
+    const here = b.id === bill.id;
+    const heads = b.participants.length;
+    const left = el('div', {}, [
+      el('b', { textContent: b.title.trim() || 'Untitled bill' }),
+      here ? el('span', { className: 'hint', textContent: ' \u00b7 open now' }) : null,
+      el('div', { className: 'hint', textContent:
+        [fmtDate(b.date), heads ? `${heads} ${heads === 1 ? 'person' : 'people'}` : ''].filter(Boolean).join(' \u00b7 ') || 'Nothing in it yet' }),
+    ]);
+    const open = here ? null : el('button', {
+      textContent: 'Open', title: `Open ${b.title.trim() || 'this bill'}`,
+      onclick: () => loadBill(b),
+    });
+    // The open bill can be emptied but not removed: there is always one.
+    const drop = el('button', {
+      className: 'icon', textContent: '\u2715', title: here ? 'Empty this bill' : `Delete ${b.title.trim() || 'this bill'}`,
+      onclick: () => {
+        if (!confirm(here ? 'Clear this bill and start a fresh one?' : `Delete "${b.title.trim() || 'Untitled bill'}"? This cannot be undone.`)) return;
+        if (here) { bill = blank(); save(); paintFields(); $('tos').checked = true; renderAll(); return; }
+        shelf = shelf.filter((x) => x.id !== b.id);
+        writeShelf();
+        renderBills();
+      },
+    });
+    const right = el('div', { style: 'text-align:right; white-space:nowrap' }, [
+      el('div', {}, [el('b', { textContent: `Rp ${money(calcShares(b).total)}` })]),
+      el('div', { style: 'margin-top:6px; display:flex; gap:6px; justify-content:flex-end; align-items:center' }, [open, drop]),
+    ]);
+    box.append(el('div', { className: 'share' }, [left, right]));
+  }
+}
+
+$('billNew').onclick = () => loadBill(blank());
+
+// A file is how a bill moves between phones — and the only copy of it that
+// outlives this browser. It is the bill itself, not a report: it opens back up
+// here with every item, every tag and every phone number where they were.
+$('billSave').onclick = async () => {
+  try { await deliver(new File([JSON.stringify(bill, null, 2)], fileName('json'), { type: 'application/json' })); }
+  catch (e) { alert(`The bill couldn't be saved as a file. ${e.message}`); }
+};
+$('billOpen').onclick = () => $('billFile').click();
+$('billFile').onchange = async () => {
+  const file = $('billFile').files?.[0];
+  $('billFile').value = ''; // so the same file can be opened twice
+  if (!file) return;
+  try {
+    if (file.size > 8e6) throw new Error('It is far too big to be one.');
+    const raw = JSON.parse(await file.text());
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('There is no bill inside it.');
+    // A file opened twice is the same bill twice, so it takes a fresh name of
+    // its own rather than quietly replacing the copy already here.
+    loadBill(clean({ ...raw, id: newId() }));
+  } catch (e) {
+    alert(`That file isn't a bill this app can open. ${e.message}`);
   }
 };
 
@@ -1197,7 +1326,7 @@ styleSeg.onclick = (e) => {
   bill.pdfStyle = v; save(); renderPdfStyle();
 };
 
-function renderAll() { renderPeople(); renderItems(); renderSummary(); renderPhoto(); renderPays(); renderPdfStyle(); }
+function renderAll() { renderPeople(); renderItems(); renderSummary(); renderPhoto(); renderPays(); renderPdfStyle(); renderBills(); }
 renderAll();
 
 // --- PDF -------------------------------------------------------------------
@@ -1473,14 +1602,6 @@ $('csv').onclick = async () => {
   }
 };
 
-$('reset').onclick = () => {
-  if (!confirm('Clear this bill and start over?')) return;
-  bill = blank();
-  save();
-  paintFields();
-  $('tos').checked = true;
-  renderAll();
-};
 </script>
 </body>
 </html>
