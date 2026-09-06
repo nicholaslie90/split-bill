@@ -317,7 +317,7 @@
       <div><label for="disc">Discount (Rp)</label><input id="disc" class="money" type="text" inputmode="numeric" maxlength="15"></div>
       <div><label for="discPct">Discount %</label><input id="discPct" type="number" min="0" max="100" step="0.1" inputmode="decimal"></div>
     </div>
-    <p class="hint" style="margin-top:6px">Either one (or both) — the discount is split evenly per person.</p>
+    <p class="hint" style="margin-top:6px">Either one (or both) — the discount is split evenly per person, except that nobody's share goes below zero: what a small share can't absorb comes off the others instead.</p>
     <div class="grid2" style="margin-top:10px">
       <div>
         <label for="roundTo">Round the total down to</label>
@@ -404,7 +404,7 @@
 // The ?v= is not decoration: this page and split.js are cached separately, so a
 // browser holding yesterday's split.js while loading today's page would fail to
 // import and leave every button dead. Bump it whenever split.js gains an export.
-import { calcShares, collect, digits, fmtDate, group, money, parseGemini, parseReceipt, setMoneySeparator, shareLabel, sharedByLabel, toCsv, waLink } from './split.js?v=6';
+import { calcShares, collect, digits, fmtDate, group, money, parseGemini, parseReceipt, setMoneySeparator, shareLabel, sharedByLabel, toCsv, waLink } from './split.js?v=7';
 
 const KEY = 'split-bill';
 const $ = (id) => document.getElementById(id);
@@ -1256,8 +1256,10 @@ function renderSummary() {
   t.append(el('div', {}, [el('span', { textContent: 'Subtotal' }), el('span', { textContent: `Rp ${money(result.subtotal)}` })]));
   if (result.service) t.append(el('div', {}, [el('span', { textContent: chargeLabel('Service', bill.servicePct) }), el('span', { textContent: `Rp ${money(result.service)}` })]));
   if (result.tax) t.append(el('div', {}, [el('span', { textContent: chargeLabel('Tax', bill.taxPct) }), el('span', { textContent: `Rp ${money(result.tax)}` })]));
-  if (result.discount) t.append(el('div', {}, [el('span', { textContent: `${chargeLabel('Discount', bill.discountPct)} (÷${result.people.length})` }), el('span', { textContent: `− Rp ${money(result.discount)}` })]));
-  if (result.rounding) t.append(el('div', {}, [el('span', { textContent: `Rounding (÷${result.people.length})` }), el('span', { textContent: `− Rp ${money(result.rounding)}` })]));
+  // ÷ the number it actually came off, which is everybody unless somebody's own
+  // share was too small to take it.
+  if (result.discount) t.append(el('div', {}, [el('span', { textContent: `${chargeLabel('Discount', bill.discountPct)} (÷${result.discountAmong})` }), el('span', { textContent: `− Rp ${money(result.discount)}` })]));
+  if (result.rounding) t.append(el('div', {}, [el('span', { textContent: `Rounding (÷${result.roundingAmong})` }), el('span', { textContent: `− Rp ${money(result.rounding)}` })]));
   t.append(el('div', { className: 'grand' }, [el('span', { textContent: 'Total' }), el('span', { textContent: `Rp ${money(result.total)}` })]));
   box.append(t);
 }
@@ -1541,10 +1543,10 @@ function buildPdf(H) {
   if (result.tax) row(chargeLabel('Tax', bill.taxPct), amt(result.tax), { ink: LABEL });
   if (result.discount) {
     row(chargeLabel('Discount', bill.discountPct), `- ${amt(result.discount)}`,
-        { ink: LABEL, sub: `split ${result.people.length}` });
+        { ink: LABEL, sub: `split ${result.discountAmong}` });
   }
   if (result.rounding) {
-    row('Rounding', `- ${amt(result.rounding)}`, { ink: LABEL, sub: `split ${result.people.length}` });
+    row('Rounding', `- ${amt(result.rounding)}`, { ink: LABEL, sub: `split ${result.roundingAmong}` });
   }
   y += 6;
   room(38);

@@ -6,7 +6,7 @@ Split a restaurant bill by item, then send each person their share on WhatsApp.
 
 - Tag who shared each item — nobody pays for what they didn't order. Tap a name again to buy them another share of the line: two of the four lychee teas is two taps, and they pay for two.
 - Service charge and tax as a percentage, a flat rupiah amount, or both — allocated in proportion to each person's subtotal.
-- Discount the same way — but split evenly per head, since a voucher is worth the same to everyone. Capped at the bill total.
+- Discount the same way — but split evenly per head, since a voucher is worth the same to everyone. Capped at the bill total, and nobody's share ever goes below zero: someone who only had a share of the packaging can't absorb a 50k voucher, so what they can't take comes off whoever still has something left to take it off. The line reads `Discount (÷2)` when that happens, not `÷3`.
 - Optionally round the total down to the nearest 100, 500 or 1.000 ("pembulatan"), so nobody hands over coins.
 - Amounts group themselves as you type — `59000` becomes `59.000` — with dots or commas to taste. The preference follows through to the summary, the PDF and the WhatsApp message.
 - Each person's total is the plain half-up rounding of what they actually owe — `.5` and up goes up, below stays put — and the shares still add up to the bill exactly. Where arithmetic makes both impossible (two shares of exactly `.5`), one person gives a single rupiah rather than the bill going out by one.

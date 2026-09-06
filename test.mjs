@@ -77,14 +77,52 @@ import { calcShares, collect, digits, fmtDate, group, money, parseGemini, parseR
   assert.equal(shareLabel({ sharedBy: 1, took: 1 }), ''); // nobody else on it: no note at all
 }
 
-// 2b. Discount: flat per head, reconciles, capped at the bill.
+// 2b. Discount: flat per head, reconciles, capped at the bill — and nobody is
+// ever handed money back, so what a small share cannot absorb goes to the rest.
 {
   const base = { participants: ['A', 'B', 'C'], items: [{ name: 'x', amount: 300000, sharedBy: ['A'] }] };
   const r = calcShares({ ...base, discount: 30000 });
   assert.equal(r.discount, 30000);
   assert.equal(r.total, 270000);
-  assert.deepEqual(r.people.map((p) => p.discount), [10000, 10000, 10000]);
-  assert.deepEqual(r.people.map((p) => p.total), [290000, -10000, -10000]); // B and C owe nothing but hold a voucher
+  // B and C ordered nothing, so there is nothing to take a voucher off: all of
+  // it comes off the only bill there is.
+  assert.deepEqual(r.people.map((p) => p.discount), [30000, 0, 0]);
+  assert.deepEqual(r.people.map((p) => p.total), [270000, 0, 0]);
+  assert.equal(r.discountAmong, 1);
+
+  // The everyday case is untouched: everyone can absorb an even share.
+  const even = calcShares({ participants: ['A', 'B', 'C'],
+    items: [{ name: 'x', amount: 300000, sharedBy: [] }], discount: 30000 });
+  assert.deepEqual(even.people.map((p) => p.discount), [10000, 10000, 10000]);
+  assert.deepEqual(even.people.map((p) => p.total), [90000, 90000, 90000]);
+  assert.equal(even.discountAmong, 3);
+
+  // The real one: a small share absorbs what it can, the remainder spreads.
+  // Boya 47.000 (Edi), Da Hong Pao 49.000 (Nic), packaging 2.000 between all
+  // three, and a 14.100 voucher. Ana's whole bill is 667.
+  const chagee = calcShares({
+    participants: ['Edi', 'Nic', 'Ana'],
+    items: [
+      { name: 'Boya', amount: 47000, sharedBy: ['Edi'] },
+      { name: 'Da Hong Pao', amount: 49000, sharedBy: ['Nic'] },
+      { name: 'Packaging', amount: 2000, sharedBy: [] },
+    ],
+    discount: 14100,
+  });
+  assert.deepEqual(chagee.people.map((p) => p.total), [40950, 42950, 0]);
+  assert.deepEqual(chagee.people.map((p) => p.discount), [6717, 6717, 667]);
+  assert.equal(chagee.people.reduce((a, p) => a + p.total, 0), chagee.total); // the rule that matters
+  // Each column is rounded inside the person it explains, so a column can sit a
+  // rupiah off its own headline. What people pay is exact; the reasons are
+  // rounded to the rupiah they read.
+  assert.ok(Math.abs(chagee.people.reduce((a, p) => a + p.discount, 0) - chagee.discount) <= 1);
+  assert.equal(chagee.discountAmong, 3);
+  assert.ok(chagee.people.every((p) => p.total >= 0));
+
+  // Pembulatan cannot push anybody under either.
+  const shaved = calcShares({ ...base, discount: 299000, roundTo: 1000 });
+  assert.ok(shaved.people.every((p) => p.total >= 0), 'rounding never goes below zero');
+  assert.equal(shaved.people.reduce((a, p) => a + p.total, 0), shaved.total);
 
   // odd amount still sums exactly
   const odd = calcShares({ ...base, discount: 10000 });
@@ -308,12 +346,14 @@ assert.deepEqual(roundToSum([1142.5, 1142.5], 2285), [1143, 1142]);
   }
   // nobody marked -> the whole bill is owed by the four of them
   assert.equal(collect(r, '').due, r.total);
-  // people who owe nothing are left off the list; a voucher-holder still shows,
-  // as a negative — the payer owes them, and the sum must still reconcile.
+  // People who owe nothing are left off the list. A voucher big enough to wipe
+  // the bill leaves everybody at zero rather than anybody in credit: B never
+  // ordered anything, so there was nothing of B's for it to come off.
   const voucher = calcShares({ participants: ['A', 'B'], items: [{ name: 'x', amount: 100, sharedBy: ['A'] }], discount: 200 });
-  assert.deepEqual(voucher.people.map((p) => p.total), [50, -50]); // discount capped at 100, split evenly
-  assert.deepEqual(collect(voucher, 'A').owed.map((o) => o.total), [-50]);
-  assert.equal(collect(voucher, 'A').due + 50, voucher.total);
+  assert.deepEqual(voucher.people.map((p) => p.total), [0, 0]);
+  assert.equal(voucher.total, 0);
+  assert.deepEqual(collect(voucher, 'A').owed, []);
+  assert.equal(collect(voucher, 'A').due, 0);
   const nil = calcShares({ participants: ['A', 'B'], items: [{ name: 'x', amount: 100, sharedBy: ['A'] }] });
   assert.deepEqual(collect(nil, 'A').owed, []); // B ordered nothing, so B is not on the list
 }

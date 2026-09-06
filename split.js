@@ -75,9 +75,15 @@ export function calcShares(bill) {
   // slice of service and tax, less an even share of the discount.
   // No items yet -> nobody has a slice, so flat charges split evenly.
   const cut = gross > 0 ? weights.map((w) => w / gross) : weights.map(() => 1 / people.length);
-  const parts = cut.map((f) => [
-    f * subtotal, f * svcTotal, f * taxTotal,
-    -discount / people.length, -rounding / people.length,
+  const charge = cut.map((f) => f * (subtotal + svcTotal + taxTotal));
+  // Evenly, but nobody hands money back: somebody who only had a share of the
+  // packaging cannot absorb a fifty-thousand voucher, and the rest of it has to
+  // go somewhere. Their bill stops at zero and what they could not take spreads
+  // over whoever still has something left to take it off.
+  const cutOff = spreadDown(charge, discount);
+  const shave = spreadDown(charge.map((c, i) => c - cutOff[i]), rounding);
+  const parts = cut.map((f, i) => [
+    f * subtotal, f * svcTotal, f * taxTotal, -cutOff[i], -shave[i],
   ]);
 
   // Round the number people actually read — their total — and only then split it
@@ -104,9 +110,30 @@ export function calcShares(bill) {
     service: svcTotal,
     tax: taxTotal,
     discount,
+    // How many people the discount actually came off. Usually everybody; fewer
+    // when it was bigger than somebody's whole share, and then "÷3" would be a
+    // lie on the one line people check.
+    discountAmong: cutOff.filter((v) => v > 0).length,
     rounding,
+    roundingAmong: shave.filter((v) => v > 0).length,
     total: charged - discount - rounding,
   };
+}
+
+// Take `total` off `caps` in equal parts, except that no part may be more than
+// its cap: whatever one cannot take is shared out again among the rest. Sorted
+// smallest first, so the moment a share fits it fits for everyone after it.
+// Assumes the caps can hold the total between them, which the bill guarantees:
+// the discount is capped at the charges and the rounding at what is left.
+function spreadDown(caps, total) {
+  const out = caps.map(() => 0);
+  const order = caps.map((_, i) => i).sort((a, b) => caps[a] - caps[b]);
+  let left = total;
+  order.forEach((i, k) => {
+    out[i] = Math.min(Math.max(caps[i], 0), left / (order.length - k));
+    left -= out[i];
+  });
+  return out;
 }
 
 // "Nic-Cin x2, Naren" — the tally read out. Printing a name once per share
