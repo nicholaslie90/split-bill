@@ -25,6 +25,16 @@ export function roundToSum(values, target) {
 // the line is cut into, which is what makes the arithmetic fall out unchanged.
 //         servicePct, serviceAmt, taxPct, taxAmt, taxOnService, discount, discountPct, roundTo }
 // Service, tax and discount each take a percentage, a flat rupiah amount, or both.
+// The total the struk printed, when somebody has typed it in. Blank means
+// "work it out from the percentages"; zero is a real answer, so only blank
+// counts as absent.
+export const statedTotal = (bill) => {
+  const v = bill?.billTotal;
+  if (v === '' || v == null) return null;
+  const n = Math.round(Number(v));
+  return Number.isFinite(n) && n >= 0 ? n : null;
+};
+
 export function calcShares(bill) {
   const people = bill.participants ?? [];
   const empty = { people: [], subtotal: 0, service: 0, tax: 0, discount: 0, rounding: 0, total: 0 };
@@ -49,13 +59,23 @@ export function calcShares(bill) {
   }
 
   const gross = weights.reduce((a, b) => a + b, 0);
+  const subtotal = Math.round(gross);
   const svcPct = Number(bill.servicePct) || 0;
   const taxPct = Number(bill.taxPct) || 0;
-  const service = (gross * svcPct) / 100 + (Number(bill.serviceAmt) || 0);
+  // A struk prints its own total, and typing that is quicker and safer than
+  // working out which percentage was charged on what. When it is there, the
+  // difference between it and the items is the charge — spread over them in
+  // proportion, which is exactly what a service charge and a tax already do,
+  // so nothing else about the arithmetic changes. Which part of it was service
+  // and which was tax the struk alone can say, so the app doesn't guess: it is
+  // one line. The percentage fields step aside while it is filled in.
+  const stated = statedTotal(bill);
+  const service = stated == null ? (gross * svcPct) / 100 + (Number(bill.serviceAmt) || 0) : stated - subtotal;
   // ID convention: PPN is charged on subtotal + service charge (flat part included). Toggleable.
-  const tax = ((gross + (bill.taxOnService === false ? 0 : service)) * taxPct) / 100 + (Number(bill.taxAmt) || 0);
+  const tax = stated == null
+    ? ((gross + (bill.taxOnService === false ? 0 : service)) * taxPct) / 100 + (Number(bill.taxAmt) || 0)
+    : 0;
 
-  const subtotal = Math.round(gross);
   const svcTotal = Math.round(service);
   const taxTotal = Math.round(tax);
   const charged = subtotal + svcTotal + taxTotal;
@@ -311,7 +331,7 @@ export function toCsv(bill, result) {
     ]),
     [],
     ['Subtotal', result.subtotal],
-    ['Service charge', result.service],
+    [statedTotal(bill) == null ? 'Service charge' : 'Service & tax (from the total)', result.service],
     ['Tax', result.tax],
     ['Discount', -result.discount],
     ['Rounding', -result.rounding],

@@ -115,6 +115,7 @@
   }
   button:active { transform: scale(.96); }
   button:disabled { opacity: .55; cursor: default; transform: none; }
+  input:disabled { opacity: .5; }
   button.primary {
     background: var(--accent); color: var(--accent-ink); border-color: transparent;
     font-weight: 600; box-shadow: var(--shadow);
@@ -304,6 +305,11 @@
 
   <section>
     <h2>Service, tax &amp; discount</h2>
+    <!-- The quickest true thing on a struk is the figure at the bottom. Type
+         it and the charges fall out of the difference; leave it and the
+         percentages do the work as before. -->
+    <div><label for="billTotal">Total on the struk (Rp)</label><input id="billTotal" class="money" type="text" inputmode="numeric" maxlength="15"></div>
+    <p class="hint" id="totalNote" style="margin:6px 0 12px" aria-live="polite"></p>
     <div class="grid2">
       <div><label for="svc">Service charge %</label><input id="svc" type="number" min="-100" max="100" step="0.1" inputmode="decimal"></div>
       <div><label for="svcAmt">Service charge (Rp)</label><input id="svcAmt" class="money" type="text" inputmode="numeric" maxlength="15"></div>
@@ -404,7 +410,7 @@
 // The ?v= is not decoration: this page and split.js are cached separately, so a
 // browser holding yesterday's split.js while loading today's page would fail to
 // import and leave every button dead. Bump it whenever split.js gains an export.
-import { calcShares, collect, digits, fmtDate, group, money, parseGemini, parseReceipt, setMoneySeparator, shareLabel, sharedByLabel, toCsv, waLink } from './split.js?v=7';
+import { calcShares, collect, digits, fmtDate, group, money, parseGemini, parseReceipt, setMoneySeparator, shareLabel, sharedByLabel, statedTotal, toCsv, waLink } from './split.js?v=8';
 
 const KEY = 'split-bill';
 const $ = (id) => document.getElementById(id);
@@ -428,12 +434,13 @@ const blank = () => ({
   id: newId(),
   title: '', date: new Date().toISOString().slice(0, 10),
   participants: [], phones: {}, paidBy: '', items: [], photo: '',
+  billTotal: '',
   servicePct: 5, serviceAmt: '', taxPct: 11, taxAmt: '', taxOnService: true,
   discount: '', discountPct: '', roundTo: 0,
   pay: [], pdfStyle: 'beautiful', sent: [],
 });
 
-const FIELDS = [['title', 'title'], ['date', 'date'],
+const FIELDS = [['title', 'title'], ['date', 'date'], ['billTotal', 'billTotal'],
                 ['svc', 'servicePct'], ['svcAmt', 'serviceAmt'],
                 ['tax', 'taxPct'], ['taxAmt', 'taxAmt'],
                 ['disc', 'discount'], ['discPct', 'discountPct'], ['roundTo', 'roundTo'],
@@ -458,7 +465,7 @@ function clean(raw) {
     ...it, name: String(it?.name ?? '').slice(0, 120), amount: rupiah(it?.amount),
     sharedBy: Array.isArray(it?.sharedBy) ? it.sharedBy.map(String) : [],
   }));
-  for (const k of ['serviceAmt', 'taxAmt', 'discount']) b[k] = rupiah(b[k]);
+  for (const k of ['serviceAmt', 'taxAmt', 'discount', 'billTotal']) b[k] = rupiah(b[k]);
   for (const k of ['servicePct', 'taxPct', 'discountPct']) b[k] = pct(b[k]);
   b.roundTo = Number(b.roundTo) || 0;
   // Who has already had theirs. Kept to people who are still on the bill, so a
@@ -583,7 +590,13 @@ function renderBills() {
   }
 }
 
-$('billNew').onclick = () => loadBill(blank());
+$('billNew').onclick = () => {
+  loadBill(blank());
+  // The whole page just changed under a button at the foot of it. Go back to
+  // the top, where the empty bill starts, rather than leaving you staring at
+  // the shelf you have finished with.
+  scrollTo({ top: 0, behavior: still.matches ? 'auto' : 'smooth' });
+};
 
 // A file is how a bill moves between phones — and the only copy of it that
 // outlives this browser. It is the bill itself, not a report: it opens back up
@@ -673,14 +686,14 @@ const swipeOut = (node) => (still.matches || !node?.animate
 const markNew = (boxId, sel) => $(boxId).querySelector(`${sel}:last-of-type`)?.classList.add('enter');
 
 // --- header + charges -------------------------------------------------------
-const MONEY = new Set(['svcAmt', 'taxAmt', 'disc']);
+const MONEY = new Set(['svcAmt', 'taxAmt', 'disc', 'billTotal']);
 const paintFields = () => {
   for (const [id, key] of FIELDS) $(id).value = MONEY.has(id) ? group(bill[key]) : bill[key];
   $('dateText').textContent = fmtDate(bill.date);
 };
 paintFields();
 for (const [id, key] of FIELDS) {
-  if (MONEY.has(id)) onMoneyInput($(id), (raw) => { bill[key] = raw; save(); renderSummary(); });
+  if (MONEY.has(id)) onMoneyInput($(id), (raw) => { bill[key] = raw; save(); renderSummary(); renderCharges(); });
   else $(id).oninput = () => { bill[key] = $(id).value; save(); $('dateText').textContent = fmtDate(bill.date); renderSummary(); };
 }
 
@@ -1085,6 +1098,12 @@ let result = { people: [], subtotal: 0, service: 0, tax: 0, total: 0 };
 const label = () => `${bill.title?.trim() || 'Split Bill'}${fmtDate(bill.date) ? ` (${fmtDate(bill.date)})` : ''}`;
 // "Service 5%" when a percentage drives it, plain "Service" when it's a flat amount.
 const chargeLabel = (name, pct) => `${name}${Number(pct) ? ` ${pct}%` : ''}`;
+// A percentage names its own rate. A charge worked back from the printed total
+// is service and tax at once and cannot say which is which, and if the total
+// came in under the items it is not a charge at all.
+const svcName = (long) => statedTotal(bill) != null
+  ? (result.service < 0 ? 'Less than the items' : 'Service & tax')
+  : chargeLabel(long ? 'Service charge' : 'Service', bill.servicePct);
 
 // Where the money can go. One entry per account — "BCA 1234567890" with
 // "a.n. Budi" under it — and an account with nothing typed into it is dropped
@@ -1116,7 +1135,7 @@ function messageFor(p) {
   }
   const lines = p.lines.map((l) => `• ${l.name || 'Item'} — Rp ${money(l.share)}${shareLabel(l) ? ` (${shareLabel(l)})` : ''}`);
   const extras = [
-    p.service ? `Service: Rp ${money(p.service)}` : null,
+    p.service ? `${svcName()}: Rp ${money(p.service)}` : null,
     p.tax ? `Tax: Rp ${money(p.tax)}` : null,
     p.discount ? `Discount: −Rp ${money(p.discount)}` : null,
     p.rounding ? `Rounding: −Rp ${money(p.rounding)}` : null,
@@ -1254,7 +1273,7 @@ function renderSummary() {
   renderSent();
   const t = el('div', { className: 'totals' });
   t.append(el('div', {}, [el('span', { textContent: 'Subtotal' }), el('span', { textContent: `Rp ${money(result.subtotal)}` })]));
-  if (result.service) t.append(el('div', {}, [el('span', { textContent: chargeLabel('Service', bill.servicePct) }), el('span', { textContent: `Rp ${money(result.service)}` })]));
+  if (result.service) t.append(el('div', {}, [el('span', { textContent: svcName() }), el('span', { textContent: `Rp ${money(result.service)}` })]));
   if (result.tax) t.append(el('div', {}, [el('span', { textContent: chargeLabel('Tax', bill.taxPct) }), el('span', { textContent: `Rp ${money(result.tax)}` })]));
   // ÷ the number it actually came off, which is everybody unless somebody's own
   // share was too small to take it.
@@ -1365,7 +1384,27 @@ for (const b of ask.querySelectorAll('[data-style]')) {
 $('askClose').onclick = () => { picked = null; ask.close(); };
 ask.oncancel = () => { picked = null; }; // Esc, which closes the dialog by itself
 
-function renderAll() { renderPeople(); renderItems(); renderSummary(); renderPhoto(); renderPays(); renderBills(); }
+// The struk's own total, once typed, is doing the job the percentage fields
+// were there for. They are left visible and switched off rather than hidden:
+// what you typed into them is still yours, and clearing the total hands the
+// work straight back.
+const CHARGE_FIELDS = ['svc', 'svcAmt', 'tax', 'taxAmt', 'tos'];
+function renderCharges() {
+  const stated = statedTotal(bill);
+  for (const id of CHARGE_FIELDS) $(id).disabled = stated != null;
+  if (stated == null) {
+    $('totalNote').textContent = 'Optional. Type the figure at the bottom of the struk and the service and tax work themselves out, spread across the items in proportion. Leave it blank to set the percentages yourself.';
+    return;
+  }
+  const rate = result.subtotal ? ` (${(Math.abs(result.service) / result.subtotal * 100).toFixed(1).replace('.', sep === ',' ? ',' : '.')}% of the items)` : '';
+  $('totalNote').textContent = result.service === 0
+    ? 'That is exactly what the items come to, so there is nothing to add.'
+    : result.service > 0
+      ? `Rp ${money(result.service)} of service and tax${rate}, spread across the items. The fields below are switched off while this has a figure in it.`
+      : `Rp ${money(-result.service)} less than the items${rate}, taken off them in proportion. The fields below are switched off while this has a figure in it.`;
+}
+
+function renderAll() { renderPeople(); renderItems(); renderSummary(); renderCharges(); renderPhoto(); renderPays(); renderBills(); }
 renderAll();
 
 // --- PDF -------------------------------------------------------------------
@@ -1480,7 +1519,7 @@ function buildPdf(H) {
     const fronted = p.name === bill.paidBy;
     const detail = [
       ...p.lines.map((l) => [`${l.name || 'Item'}${shareLabel(l) ? `   ${shareLabel(l)}` : ''}`, money(l.share)]),
-      ...(p.service ? [['Service charge', money(p.service)]] : []),
+      ...(p.service ? [[svcName(true), money(p.service)]] : []),
       ...(p.tax ? [['Tax', money(p.tax)]] : []),
       ...(p.discount ? [['Discount', `- ${money(p.discount)}`]] : []),
       ...(p.rounding ? [['Rounding', `- ${money(p.rounding)}`]] : []),
@@ -1539,7 +1578,7 @@ function buildPdf(H) {
   y += 7;
   room(10); rule(y); y += 17;
   row('Subtotal', amt(result.subtotal), { ink: FIGURE });
-  if (result.service) row(chargeLabel('Service charge', bill.servicePct), amt(result.service), { ink: LABEL });
+  if (result.service) row(svcName(true), amt(result.service), { ink: LABEL });
   if (result.tax) row(chargeLabel('Tax', bill.taxPct), amt(result.tax), { ink: LABEL });
   if (result.discount) {
     row(chargeLabel('Discount', bill.discountPct), `- ${amt(result.discount)}`,

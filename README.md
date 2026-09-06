@@ -5,6 +5,7 @@ Split a restaurant bill by item, then send each person their share on WhatsApp.
 **Live:** https://nicholaslie90.github.io/split-bill/
 
 - Tag who shared each item — nobody pays for what they didn't order. Tap a name again to buy them another share of the line: two of the four lychee teas is two taps, and they pay for two.
+- **Type the total off the struk** and the charges work themselves out: the difference between it and your items is spread across them in proportion, which is exactly what a service charge and a PPN do. One line, *Service & tax*, because only the struk knows which part was which. It wins over the percentage fields while it has a figure in it, and clearing it hands the work straight back to them. A total *under* the items is the discount the struk printed, taken off the same way. With no items at all it is simply the bill split evenly, which is the fastest way to settle up over something nobody wants to type out.
 - Service charge and tax as a percentage, a flat rupiah amount, or both — allocated in proportion to each person's subtotal.
 - Discount the same way — but split evenly per head, since a voucher is worth the same to everyone. Capped at the bill total, and nobody's share ever goes below zero: someone who only had a share of the packaging can't absorb a 50k voucher, so what they can't take comes off whoever still has something left to take it off. The line reads `Discount (÷2)` when that happens, not `÷3`.
 - Optionally round the total down to the nearest 100, 500 or 1.000 ("pembulatan"), so nobody hands over coins.

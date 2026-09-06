@@ -1,6 +1,6 @@
 // node test.mjs  — fails loudly if the money math breaks.
 import assert from 'node:assert/strict';
-import { calcShares, collect, digits, fmtDate, group, money, parseGemini, parseReceipt, roundToSum, setMoneySeparator, shareLabel, sharedByLabel, toCsv, waLink, waNumber } from './split.js';
+import { calcShares, collect, digits, fmtDate, group, money, parseGemini, parseReceipt, roundToSum, setMoneySeparator, shareLabel, sharedByLabel, statedTotal, toCsv, waLink, waNumber } from './split.js';
 
 // 1. The example from the brief: equal split per item, nobody pays for what they didn't eat.
 {
@@ -75,6 +75,58 @@ import { calcShares, collect, digits, fmtDate, group, money, parseGemini, parseR
   assert.equal(sharedByLabel([]), '');
   assert.equal(sharedByLabel(undefined), '');
   assert.equal(shareLabel({ sharedBy: 1, took: 1 }), ''); // nobody else on it: no note at all
+}
+
+// 2c. The struk's own total, typed in instead of the percentages. The
+// difference between it and the items is the charge, spread over them in
+// proportion — so the same bill comes out the same either way.
+{
+  const base = { participants: ['A', 'B'],
+    items: [{ name: 'x', amount: 100000, sharedBy: ['A'] }, { name: 'y', amount: 100000, sharedBy: ['B'] }] };
+  const byPct = calcShares({ ...base, servicePct: 5, taxPct: 11 });
+  const byTotal = calcShares({ ...base, billTotal: '233100' });
+  assert.equal(byTotal.total, 233100);
+  assert.equal(byTotal.subtotal, 200000);
+  assert.equal(byTotal.service, 33100); // service and tax as one line: the struk alone knows the split
+  assert.equal(byTotal.tax, 0);
+  assert.deepEqual(byTotal.people.map((p) => p.total), byPct.people.map((p) => p.total));
+
+  // It wins over the percentages rather than stacking with them.
+  assert.equal(calcShares({ ...base, billTotal: '233100', servicePct: 5, taxPct: 11 }).total, 233100);
+  // ...and stepping aside is what a blank field means. Zero is a real answer.
+  assert.equal(calcShares({ ...base, billTotal: '', servicePct: 5, taxPct: 11 }).total, 233100);
+  assert.equal(calcShares({ ...base, billTotal: '0' }).total, 0);
+  assert.deepEqual(calcShares({ ...base, billTotal: '0' }).people.map((p) => p.total), [0, 0]);
+
+  // A total under the items is a discount the struk printed: off in proportion,
+  // and nobody ends up in credit.
+  const under = calcShares({ ...base, billTotal: '180000' });
+  assert.equal(under.total, 180000);
+  assert.equal(under.service, -20000);
+  assert.deepEqual(under.people.map((p) => p.total), [90000, 90000]);
+
+  // Nothing itemised yet: the whole total splits evenly, which is the fastest
+  // possible way to split a bill nobody wants to type out.
+  const flat = calcShares({ participants: ['A', 'B', 'C'], items: [], billTotal: '300000' });
+  assert.deepEqual(flat.people.map((p) => p.total), [100000, 100000, 100000]);
+
+  // A voucher still comes off after it, per head, and the sums still hold.
+  const withVoucher = calcShares({ ...base, billTotal: '233100', discount: 33100 });
+  assert.equal(withVoucher.total, 200000);
+  assert.equal(withVoucher.people.reduce((a, p) => a + p.total, 0), 200000);
+  // As does pembulatan.
+  const rounded = calcShares({ ...base, billTotal: '233100', roundTo: 1000 });
+  assert.equal(rounded.total, 233000);
+  assert.equal(rounded.people.reduce((a, p) => a + p.total, 0), 233000);
+
+  // Only a blank field means "use the percentages"; junk and negatives are not
+  // a total anybody typed on purpose.
+  assert.equal(statedTotal({ billTotal: '233100' }), 233100);
+  assert.equal(statedTotal({ billTotal: '0' }), 0);
+  assert.equal(statedTotal({ billTotal: '' }), null);
+  assert.equal(statedTotal({}), null);
+  assert.equal(statedTotal({ billTotal: 'abc' }), null);
+  assert.equal(statedTotal({ billTotal: -5 }), null);
 }
 
 // 2b. Discount: flat per head, reconciles, capped at the bill — and nobody is
