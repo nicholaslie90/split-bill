@@ -277,8 +277,13 @@
     <dialog id="cam" aria-label="Photograph the receipt">
       <video id="feed" playsinline muted></video>
       <p class="hint" style="margin:8px 0">Fill the frame with the receipt, straight on and in good light — that is most of what makes the reading accurate.</p>
+      <!-- Two rows, not three across: at phone width the third label wrapped to
+           two lines and stood a head taller than its neighbours. Taking the
+           photo is the reason the sheet is open, so it gets the full width. -->
       <div class="row">
         <button id="shoot" class="primary">Take photo</button>
+      </div>
+      <div class="row" style="margin-top:8px">
         <!-- A label, not a button that clicks the input in script. A modal
              dialog makes the whole page outside it inert, and a file picker
              opened from script needs a live tap the browser still recognises
@@ -902,12 +907,39 @@ const getWorker = () => (worker ??= loadOcr().then(async (T) => {
 // straight into Tesseract and it produced no item lines at all.
 const SHOT_WIDTH = 1600;
 
+// Two ways to decode a photo, because one of them is not enough. Android hands
+// back whatever the gallery feels like — a HEIC from a phone set to "high
+// efficiency", a picture the cloud has not finished downloading — and
+// createImageBitmap refuses several of those with nothing to go on but "the
+// source image could not be decoded". An <img> takes some of them without
+// complaint, and turns the EXIF rotation the right way up while it is there,
+// which createImageBitmap only does if asked. So ask twice before giving up.
+async function decode(file) {
+  if (!file.size) throw new Error('That photo came back empty — if it lives in the cloud, open it in your gallery first so the phone has a copy.');
+  try {
+    return await createImageBitmap(file, { imageOrientation: 'from-image' });
+  } catch {
+    const img = el('img', { src: URL.createObjectURL(file) });
+    try {
+      await img.decode();
+      return img;
+    } catch {
+      URL.revokeObjectURL(img.src);
+      const kb = Math.round(file.size / 1024);
+      throw new Error(`This browser can't read that photo (${file.type || 'unknown type'}, ${kb} KB). Phones that save pictures as HEIC are the usual reason. Take the picture with the camera button instead, or save a JPEG copy of it.`);
+    }
+  }
+}
+
 async function prepare(file) {
-  const img = await createImageBitmap(file);
-  const scale = Math.min(1, SHOT_WIDTH / img.width);
-  const c = el('canvas', { width: Math.round(img.width * scale), height: Math.round(img.height * scale) });
+  const img = await decode(file);
+  const w = img.naturalWidth || img.width;
+  const h = img.naturalHeight || img.height;
+  const scale = Math.min(1, SHOT_WIDTH / w);
+  const c = el('canvas', { width: Math.round(w * scale), height: Math.round(h * scale) });
   c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
-  img.close();
+  img.close?.();                                   // an ImageBitmap holds real memory
+  if (img.src) URL.revokeObjectURL(img.src);       // and an <img> holds a blob URL
   return c;
 }
 
@@ -1350,8 +1382,8 @@ $('photoPick').onchange = async () => {
     note(save()
       ? `Photo attached, not read — press Scan a receipt if you want its items too. ${KEEP()}`
       : `That photo was too big to keep, so the PDF goes without it. ${KEEP()}`);
-  } catch {
-    note(`Couldn't read that photo — try another. ${KEEP()}`);
+  } catch (e) {
+    note(`${e.message} ${KEEP()}`);
   }
   renderPhoto();
 };
