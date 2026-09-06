@@ -142,7 +142,7 @@ export function collect(result, payer) {
 // purpose: "Meja 7" is not an item either, but it's printed in the header and
 // must not stop the reading before it starts.
 const END_OF_ITEMS = /(sub\s*)?total|servi|charg|ppn|pb\s*[1li|]|pajak|tax|diskon|discount|voucher|pembulatan|rounding|tunai|cash|kembali|change|\d+\s*(items|barang|qty)\b/i;
-const NOT_AN_ITEM = /(sub\s*)?total|tunai|cash|kembali|change|ppn|pb\s*1|pajak|tax|servi|diskon|discount|voucher|pembulatan|rounding|bayar|payment|kartu|card|debit|kredit|credit|qris|npwp|terima\s*kasih|thank|kasir|cashier|struk|\bnota\b|receipt|invoice|meja|table|tanggal|date|\d{1,2}\s*[/-]\s*\d{1,2}\s*[/-]|jam|time|\bpax\b|\d+\s*(items|barang|qty)\b|www\.|@/i;
+const NOT_AN_ITEM = /(sub\s*)?total|tunai|cash|kembali|change|ppn|pb\s*1|pajak|tax|servi|diskon|discount|voucher|pembulatan|rounding|bayar|payment|kartu|card|debit|kredit|credit|qris|npwp|terima\s*kasih|thank|kasir|cashier|struk|\bnota\b|receipt|invoice|meja|table|tanggal|date|\d{1,2}\s*[/-]\s*\d{1,2}\s*[/-]|jam|time|\bpax\b|\d+\s*(items|barang|qty)\b|catatan|www\.|@/i;
 // 59.000 | 59,000 | 1.234.567 | 59000 — with an optional two-decimal tail. The
 // space around the separator is OCR's, not the printer's: "165 .000" is one
 // number that a crease broke in half, and dropping it loses a whole item line.
@@ -159,10 +159,29 @@ const asRupiah = (s) => {
   return Number((trimmed.replace(/\D/g, '').length >= 3 ? trimmed : s).replace(/\D/g, ''));
 };
 
+// What's left of a line once the money is off it: the quantity kept only when
+// it is more than one — "2x Es Teh" explains the amount, a lone "1" says
+// nothing — and the punctuation OCR sprays down both edges taken off.
+const LETTERS = (s) => (s.match(/[a-z]/gi) ?? []).length;
+const dishName = (s) => s
+  .replace(UNIT_PRICE, '')
+  .replace(/^rp\.?\s*/i, '') // "Rp 79.000" on a line of its own is a price, not a dish called Rp
+  .replace(/^(\d+)\s*[xX*]?\s+/, (_, q) => (Number(q) > 1 ? `${q}x ` : ''))
+  .replace(/^[\s.,:;*|-]+/, '')
+  .replace(/[\s.,:;xX*@=|-]+$/, '')
+  .trim();
+
 export function parseReceipt(text) {
   const items = [];
   let total = null;
   let done = false; // past the last dish, into the charges
+  // A printed struk puts the price beside the dish; a delivery app's order
+  // screen puts it underneath, sometimes with a note in between. So the lines
+  // with no money on them are held, and a price that arrives without a name of
+  // its own takes the first one of those that reads like a dish. Five deep: a
+  // wrapped name and a note, no more, so a price can never reach back up into
+  // the shop's address at the top of the page.
+  let pending = [];
   for (const raw of String(text ?? '').split('\n')) {
     const line = raw.trim();
     // Every struk prints its dishes first and its charges after, so the first
@@ -173,27 +192,37 @@ export function parseReceipt(text) {
     // noise that happens to read as "total" can't swallow the whole receipt.
     done ||= items.length > 0 && END_OF_ITEMS.test(line);
     const found = line.match(MONEY_ON_LINE);
-    if (!found) continue;
+    if (!found) {
+      if (line) pending = [...pending, line].slice(-5);
+      continue;
+    }
     const amount = asRupiah(found[found.length - 1]); // unit price then line total: the line total wins
     // Nothing on a struk costs less than a thousand rupiah, and nothing costs a
     // hundred million: below is a table number or the tail of a misread line,
     // above is the shop's phone number read as one long figure.
-    if (amount < 1000 || amount > 100_000_000) continue;
+    // Not money after all — a size ("400 ml"), a table number, a phone number
+    // read as one long figure. Still text, so it can still name the price that
+    // comes after it.
+    if (amount < 1000 || amount > 100_000_000) {
+      pending = [...pending, line].slice(-5);
+      continue;
+    }
     if (done || NOT_AN_ITEM.test(line)) {
       // The printed total is worth keeping as a cross-check, even though it's
       // not an item. Receipts print SUBTOTAL, then TOTAL, then what was paid.
       if (/\btotals?\b/i.test(line) && !/sub\s*total/i.test(line)) total = amount;
+      pending = [];
       continue;
     }
-    // Quantity leads the line more often than not. Keep it when it's more than
-    // one — "2x Es Teh" explains the amount — and drop a lone "1".
-    const name = line.slice(0, line.lastIndexOf(found[found.length - 1]))
-      .replace(UNIT_PRICE, '')
-      .replace(/^(\d+)\s*[xX*]?\s+/, (_, q) => (Number(q) > 1 ? `${q}x ` : ''))
-      .replace(/^[\s.,:;*|-]+/, '')
-      .replace(/[\s.,:;xX*@=|-]+$/, '')
-      .trim();
-    if ((name.match(/[a-z]/gi) ?? []).length < 2) continue; // no name = not an item line
+    let name = dishName(line.slice(0, line.lastIndexOf(found[found.length - 1])));
+    // A price on a line of its own belongs to the block above it. Never to a
+    // charge line: "Subtotal" over its own figure is not a dish.
+    if (LETTERS(name) < 2) {
+      name = pending.map(dishName)
+        .find((n) => LETTERS(n) >= 2 && !NOT_AN_ITEM.test(n) && !END_OF_ITEMS.test(n)) ?? '';
+    }
+    pending = [];
+    if (LETTERS(name) < 2) continue; // no name = not an item line
     items.push({ name, amount });
   }
   return { items, total };

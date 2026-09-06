@@ -318,6 +318,54 @@ assert.deepEqual(roundToSum([1142.5, 1142.5], 2285), [1143, 1142]);
   assert.deepEqual(collect(nil, 'A').owed, []); // B ordered nothing, so B is not on the list
 }
 
+// 4g. The other layout: a delivery app's order screen, photographed or
+// screenshotted. The price is not beside the dish, it is underneath it, with a
+// quantity badge above and often a note in between — so a name has to reach
+// down to the price that follows it, without ever reaching a charge line.
+{
+  const { items, total } = parseReceipt(`
+    Detail Pesanan
+    x1
+    Tom Yum Noodle George Pork Belly
+    Single +Ramen Noodle +1 +Ramen Egg
+    Catatan: telur tolong dibuat matang
+    sempurna yah buat ibu hamil, terima kasih
+    Rp 79.000
+    x1
+    Tea (unlimited)
+    Rp 17.000
+    x1
+    Mineral Water - Pristine 400 ml
+    Rp 17.000
+    x1
+    Tom Yum Fried Rice Lv 0-3 +2 +Two Egg
+    Catatan: setengah matang telur
+    Rp 96.000
+    x1
+    George Dry Tom Yum Noodle Chicken +0.5
+    Rp 65.000
+    Subtotal            Rp 274.000
+    Service Charge 5%   Rp 13.700
+    PB1 10%             Rp 28.770
+    Total               Rp 316.470
+  `);
+  assert.deepEqual(items, [
+    // A wrapped name keeps its first line: enough to recognise the dish by, and
+    // these get edited by hand anyway.
+    { name: 'Tom Yum Noodle George Pork Belly', amount: 79000 },
+    { name: 'Tea (unlimited)', amount: 17000 },
+    { name: 'Mineral Water - Pristine 400 ml', amount: 17000 },
+    { name: 'Tom Yum Fried Rice Lv 0-3 +2 +Two Egg', amount: 96000 },
+    { name: 'George Dry Tom Yum Noodle Chicken +0.5', amount: 65000 },
+  ]);
+  assert.equal(items.reduce((a, i) => a + i.amount, 0), 274000); // the printed subtotal
+  assert.equal(total, 316470);
+  // The charges are laid out the same way. None of them is a dish.
+  assert.deepEqual(parseReceipt('Subtotal\nRp 274.000\nService Charge 5%\nRp 13.700').items, []);
+  // A price with nothing above it stays what it is.
+  assert.deepEqual(parseReceipt('Rp 79.000').items, []);
+}
+
 // 4f. Reading a struk photo. Best effort, but two things must always hold: a
 // charge line is never mistaken for an item (that would double-charge it), and
 // a number that isn't money is never taken as an amount.
