@@ -94,13 +94,16 @@
   }
   input:focus { border-color: var(--accent); }
   /* The date field keeps the native picker but wears a readable face: "29 Jul 2026"
-     sits over the browser's own 29/07/2026, and steps aside while you're typing in it. */
+     sits over the browser's own 07/29/2026 — whichever way round that browser
+     happens to put it — and steps aside only once somebody actually types into
+     the segments. A tap is not typing: on a phone it opens the picker, and the
+     readable date should still be there underneath it. */
   .datefield { position: relative; }
   .datefield span {
     position: absolute; inset: 1px 38px 1px 12px; display: flex; align-items: center;
     background: var(--bg); border-radius: 10px; pointer-events: none;
   }
-  .datefield input:focus + span, .datefield span:empty { display: none; }
+  .datefield input.typing + span, .datefield span:empty { display: none; }
   .money { text-align: right; font-variant-numeric: tabular-nums; }
   ::placeholder { color: var(--muted); opacity: 1; }
   input:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
@@ -697,6 +700,12 @@ for (const [id, key] of FIELDS) {
   else $(id).oninput = () => { bill[key] = $(id).value; save(); $('dateText').textContent = fmtDate(bill.date); renderSummary(); };
 }
 
+// Only a keystroke uncovers the native segments; the tap that opened the
+// picker leaves the readable date where it is, and blurring puts it back.
+const dateIn = $('date');
+dateIn.onkeydown = (e) => { if (!['Tab', 'Escape', 'Enter'].includes(e.key)) dateIn.classList.add('typing'); };
+dateIn.onblur = () => dateIn.classList.remove('typing');
+
 $('sep').value = sep;
 $('sep').onchange = () => {
   sep = $('sep').value === ',' ? ',' : '.';
@@ -713,12 +722,20 @@ function renderPeople() {
   const box = $('people');
   box.textContent = '';
   bill.participants.forEach((name, i) => {
-    const nameIn = el('input', { type: 'text', value: name, placeholder: 'Name', maxLength: 40, ariaLabel: 'Participant name' });
+    // A name the app made up is shown as a prompt, not as text to delete first:
+    // the row is called Person 3 until somebody says otherwise, and typing over
+    // an empty box is one gesture where clearing one is three.
+    const auto = /^Person \d+$/.test(name);
+    const nameIn = el('input', {
+      type: 'text', value: auto ? '' : name, placeholder: auto ? name : 'Name',
+      maxLength: 40, ariaLabel: 'Participant name',
+    });
     const phoneIn = el('input', { type: 'tel', value: bill.phones[name] ?? '', placeholder: 'Phone (optional)', maxLength: 24, ariaLabel: 'Phone number, optional' });
     // Renaming moves the phone and retags every item, so nobody silently loses their share.
     nameIn.onchange = () => {
       const next = nameIn.value.trim();
-      if (!next || bill.participants.some((p, j) => j !== i && p === next)) { nameIn.value = name; return; }
+      // Left empty, it keeps the name the placeholder has been showing all along.
+      if (!next || bill.participants.some((p, j) => j !== i && p === next)) { nameIn.value = auto ? '' : name; return; }
       const phone = bill.phones[name];
       delete bill.phones[name];
       if (phone) bill.phones[next] = phone;
@@ -763,7 +780,9 @@ $('addPerson').onclick = () => {
   bill.participants.push(`Person ${n}`);
   save(); renderAll();
   markNew('people', '.person');
-  $('people').querySelector('.person:last-of-type input')?.select();
+  // Straight into the empty box, keyboard up: the next thing anybody does here
+  // is type a name.
+  $('people').querySelector('.person:last-of-type input')?.focus();
 };
 
 // --- items -----------------------------------------------------------------
@@ -1061,6 +1080,10 @@ async function readHere(shot) {
 
 async function scanFile(file) {
   $('scan').disabled = true;
+  // Say so the moment the photo arrives. Decoding a 12 MP picture takes long
+  // enough on a phone to look like nothing happened at all, and the reader's
+  // own first word comes only after it.
+  note('Reading the photo…');
   try {
     const shot = await prepare(file);
     const { items, total } = await (geminiKey() ? readWithGemini(shot) : readHere(shot));
@@ -1310,8 +1333,11 @@ $('photoPick').onchange = async () => {
   if (!file) return;
   try {
     bill.photo = (await prepare(file)).toDataURL('image/jpeg', 0.8);
+    // Worth saying which of the two buttons this was: attaching and reading sit
+    // next to each other, and a photo that was only attached looks exactly like
+    // a scan that found nothing.
     note(save()
-      ? `Photo attached — it goes at the foot of the PDF. ${KEEP()}`
+      ? `Photo attached, not read — press Scan a receipt if you want its items too. ${KEEP()}`
       : `That photo was too big to keep, so the PDF goes without it. ${KEEP()}`);
   } catch {
     note(`Couldn't read that photo — try another. ${KEEP()}`);
