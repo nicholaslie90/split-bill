@@ -1472,12 +1472,17 @@ async function scanFile(file) {
   note('Reading the photo…');
   try {
     const shot = await prepare(file);
+    // The paper goes on the bill before the reading is attempted, not after.
+    // The read is the part that fails — a refused key, no signal, eight
+    // megabytes of scanner that never arrived — and a scan whose reading failed
+    // is exactly when you most want the photo kept. It used to be attached on
+    // the line after the await, so every one of those took the picture down
+    // with it. One photo, the latest: scanning again replaces it.
+    bill.photo = shot.toDataURL('image/jpeg', 0.8);
+    let kept = save();
+    renderPhoto(); // and say so now, rather than after a fifteen-second read
     const read = await (geminiKey() ? readWithGemini(shot) : readHere(shot));
     const { items, total } = read;
-    // The struk goes at the foot of the PDF whether or not the reading worked —
-    // if anything, a scan that came back empty is when you most want the paper
-    // attached. One photo, the latest: scanning again replaces it.
-    bill.photo = shot.toDataURL('image/jpeg', 0.8);
     // Append, never replace: a bad scan must not wipe out what's already typed.
     bill.items.push(...items.map((it) => ({ name: it.name, amount: String(it.amount), sharedBy: [] })));
     // The charges the struk printed, so a scan is the whole reading and what is
@@ -1504,7 +1509,10 @@ async function scanFile(file) {
       charged.push(`a total of Rp ${money(total)}, with service and tax worked back from it`);
     }
     if (charged.length) paintFields();
-    const kept = save();
+    // Not `kept && save()`: that would skip the save on a bill whose photo had
+    // already been dropped, and the items just read with it.
+    const keptAgain = save();
+    kept = kept && keptAgain;
     renderAll();
     const sum = items.reduce((a, it) => a + it.amount, 0);
     // Which of the two read it, every time. Without this line a scan that fell
@@ -1533,7 +1541,10 @@ async function scanFile(file) {
       KEEP(),
     ].filter(Boolean).join(' '));
   } catch (e) {
-    note(`${e.message} ${KEEP()}`);
+    // The reading is what failed; the photo is already on the bill. Say so, or
+    // it reads as a scan that achieved nothing at all.
+    note([e.message, bill.photo ? 'The photo is on the bill, at the foot of the PDF.' : '', KEEP()]
+      .filter(Boolean).join(' '));
   } finally {
     $('scan').disabled = false;
   }
