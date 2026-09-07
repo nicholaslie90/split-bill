@@ -283,9 +283,13 @@ export function parseReceipt(text) {
 const MAX_ITEMS = 200;      // a struk this long is a catering invoice
 const MAX_NAME = 120;
 
-const asAmount = (v) => {
+// The floor is a noise filter, not a rule about money: a dish under a thousand
+// rupiah does not exist, so a number that small in the item column is OCR
+// debris. A charge is different — five per cent of a 15.000 bill is 750, and
+// real — so the charges pass a floor of their own.
+const asAmount = (v, min = 1000) => {
   const n = Math.round(Number(v));
-  return Number.isFinite(n) && n >= 1000 && n <= 100_000_000 ? n : null;
+  return Number.isFinite(n) && n >= min && n <= 100_000_000 ? n : null;
 };
 
 export function parseGemini(data) {
@@ -302,7 +306,18 @@ export function parseGemini(data) {
     const qty = Math.round(Number(raw?.qty));
     items.push({ name: Number.isFinite(qty) && qty > 1 && qty <= 999 ? `${qty}x ${name}` : name, amount });
   }
-  return { items, total: asAmount(data?.total) };
+  // The charges as printed, not as rates: a struk says "Service Charge 5%" and
+  // then the figure it actually charged, and the figure is the one that has to
+  // add up. They land in the flat-amount fields, which is why the percentages
+  // are cleared when they do — the two are added together, not chosen between.
+  const charge = (v) => asAmount(v, 1);
+  return {
+    items,
+    total: asAmount(data?.total),
+    service: charge(data?.service),
+    tax: charge(data?.tax),
+    discount: charge(data?.discount),
+  };
 }
 
 // --- the bill as a spreadsheet ----------------------------------------------

@@ -125,7 +125,7 @@
      opens the bill, and it gives up the filled box: a grey tile beside every
      total was the loudest mark on a row whose point is the figure. */
   .billrow > .icon, .billrow > .nodrop { flex: 0 0 auto; margin-right: 6px; }
-  .billrow > .icon { background: none; border-color: transparent; box-shadow: none; }
+  .billrow > .icon { align-self: center; background: none; border-color: transparent; box-shadow: none; }
   .billrow > .icon:hover, .billrow > .icon:focus-visible { background: var(--chip); }
   /* The open bill has no cross, but it keeps the width of one, so the figures
      line up as a column down the panel — which is the whole point of setting
@@ -244,7 +244,17 @@
      out, and neither wants to be a centred row. */
   button.ico { display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
   button.ico svg { flex: 0 0 auto; }
-  button.icon { flex: 0 0 auto; padding: 10px 11px; color: var(--danger); }
+  /* An inline svg sits on the text baseline and leaves the descender space
+     under it, so a glyph-only button wears its mark a few pixels high. Every
+     button that holds one wants it as a block. */
+  button svg { display: block; }
+  /* Centred both ways, and as tall as whatever it stands beside: stretch takes
+     the row's height from the input next to it rather than from a number
+     written here that would drift the moment the input changed. */
+  button.icon {
+    flex: 0 0 auto; align-self: stretch; padding: 10px 11px; color: var(--danger);
+    display: inline-flex; align-items: center; justify-content: center;
+  }
   /* The send buttons. Icon only, and 44px at the smallest, because this is
      tapped standing up, one-handed, once for every person at the table. Solid
      for the message everyone gets; outlined, and one glyph wider, for the one
@@ -253,7 +263,6 @@
     flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
     gap: 5px; min-width: 44px; min-height: 44px; padding: 0 11px; color: var(--wa);
   }
-  button.wa svg { display: block; }
   button.wa svg + svg { color: var(--muted); }
   button.wa.bad { color: var(--danger); }
   /* Sent already. A tick beside the name rather than a dimmed row: greying out
@@ -286,7 +295,16 @@
   }
   .seg button {
     position: relative; flex: 1 1 0; background: none; border: 0; box-shadow: none;
-    padding: 4px 10px; font-size: 12px; color: var(--muted); text-align: center;
+    padding: 4px 9px; font-size: 12px; color: var(--muted);
+    display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+  }
+  .seg svg { flex: 0 0 auto; }
+  /* On a narrow phone the bar is the logo, the name and this. The marks say
+     enough on their own there — sun, moon, half-lit — and the label stays as
+     the button's accessible name. */
+  @media (max-width: 380px) {
+    .seg button span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+    .seg button { padding: 5px 8px; }
   }
   .seg button[aria-pressed=true] { color: var(--ink); font-weight: 600; }
   .seg button:active { transform: none; }
@@ -386,9 +404,9 @@
     </svg>
     <h1>Split Bill</h1>
     <div class="seg" id="theme" role="group" aria-label="Theme">
-      <button data-theme="auto" aria-pressed="true">Auto</button>
-      <button data-theme="light" aria-pressed="false">Light</button>
-      <button data-theme="dark" aria-pressed="false">Dark</button>
+      <button data-theme="auto" aria-pressed="true"><span>Auto</span></button>
+      <button data-theme="light" aria-pressed="false"><span>Light</span></button>
+      <button data-theme="dark" aria-pressed="false"><span>Dark</span></button>
     </div>
   </div>
   <div class="switch">
@@ -1279,11 +1297,15 @@ const geminiKey = () => ($('geminiKey')?.value || localStorage.getItem(KEY_SLOT)
 // a lie. Built fresh each time rather than snapshotted at load.
 const KEEP = () => [
   'Scanning is best effort, so check every name and amount afterwards.',
-  'Service, tax and discount you still enter yourself.',
+  geminiKey()
+    ? 'Service, tax and discount come off the struk as well, so check those too.'
+    : 'Service, tax and discount you still enter yourself.',
   geminiKey()
     ? 'The photo is sent to Google Gemini to be read; nothing else about the bill is.'
     : 'Nothing is uploaded: the photo and the reading both stay in your browser.',
 ].join(' ');
+// "a, b and c" — a comma before the last of three reads as a fourth.
+const list = (xs) => (xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)}`);
 const idle = () => note(`Photograph the struk with your camera, or pick a photo you already have. ${KEEP()}`);
 
 $('geminiKey').value = geminiKey();
@@ -1307,7 +1329,17 @@ idle();
 // seconds rather than fifteen. responseSchema is what keeps the reply to the
 // shape parseGemini expects, instead of prose with some JSON inside it.
 const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent';
-const GEMINI_ASK = 'Read this Indonesian restaurant receipt (struk). Return every ordered line item exactly as printed, with its quantity and its line total in whole rupiah. Do not return service charge, tax, subtotal or total as items.';
+const GEMINI_ASK = [
+  'Read this Indonesian restaurant receipt (struk).',
+  'Return every ordered line item exactly as printed, with its quantity and its line total in whole rupiah.',
+  'Do not return service charge, tax, subtotal, discount or total as items — they have fields of their own.',
+  'Fill those fields with the figures the struk actually charged, in whole rupiah, not the percentages beside them:',
+  'service is the service charge (also printed as "Service", "SC" or "Servis");',
+  'tax is the government tax ("PPN", "PB1", "Pajak", "Tax");',
+  'discount is any amount taken off ("Diskon", "Discount", "Potongan", "Voucher"), as a positive number;',
+  'total is the final figure at the foot of the struk.',
+  'Leave a field out when the struk does not print it. Never invent or calculate one.',
+].join(' ');
 const AMOUNT = { type: 'integer' };
 const GEMINI_CONFIG = {
   temperature: 0,
@@ -1319,7 +1351,12 @@ const GEMINI_CONFIG = {
         properties: { qty: { type: 'integer' }, name: { type: 'string' }, amount: AMOUNT },
         required: ['qty', 'name', 'amount'] } },
       total: AMOUNT,
+      service: AMOUNT,
+      tax: AMOUNT,
+      discount: AMOUNT,
     },
+    // Only the items are required: a struk with no service charge on it should
+    // come back without one rather than with a nought that reads as a reading.
     required: ['items'],
   },
 };
@@ -1435,25 +1472,63 @@ async function scanFile(file) {
   note('Reading the photo…');
   try {
     const shot = await prepare(file);
-    const { items, total } = await (geminiKey() ? readWithGemini(shot) : readHere(shot));
+    const read = await (geminiKey() ? readWithGemini(shot) : readHere(shot));
+    const { items, total } = read;
     // The struk goes at the foot of the PDF whether or not the reading worked —
     // if anything, a scan that came back empty is when you most want the paper
     // attached. One photo, the latest: scanning again replaces it.
     bill.photo = shot.toDataURL('image/jpeg', 0.8);
     // Append, never replace: a bad scan must not wipe out what's already typed.
     bill.items.push(...items.map((it) => ({ name: it.name, amount: String(it.amount), sharedBy: [] })));
+    // The charges the struk printed, so a scan is the whole reading and what is
+    // left is who ate what. They go in the flat-amount fields and the
+    // percentages are cleared as they do — calcShares ADDS a rate to an amount
+    // rather than choosing between them, so 5% left standing beside a service
+    // charge read off the paper would charge the table twice.
+    const charged = [];
+    const put = (key, pct, amount, words) => {
+      if (amount == null) return;
+      bill[key] = String(amount);
+      if (pct) bill[pct] = '';
+      charged.push(`${words} Rp ${money(amount)}`);
+    };
+    put('serviceAmt', 'servicePct', read.service, 'service');
+    put('taxAmt', 'taxPct', read.tax, 'tax');
+    put('discount', 'discountPct', read.discount, 'a discount of');
+    // The printed total drives the charges only when the struk did not spell
+    // them out: it wins over the fields and switches them off, so setting both
+    // would throw away the figures just read. With neither, the difference
+    // between it and the items is the whole story — which is what it is for.
+    if (!charged.length && total != null) {
+      bill.billTotal = String(total);
+      charged.push(`a total of Rp ${money(total)}, with service and tax worked back from it`);
+    }
+    if (charged.length) paintFields();
     const kept = save();
     renderAll();
-    const read = items.reduce((a, it) => a + it.amount, 0);
+    const sum = items.reduce((a, it) => a + it.amount, 0);
     // Which of the two read it, every time. Without this line a scan that fell
     // back to the local reader — a key that never saved, a field a password
     // manager filled silently — looks exactly like Gemini doing a bad job.
     const reader = geminiKey() ? 'Gemini' : 'the reader on your device';
     note([
       items.length
-        ? `${geminiKey() ? 'Gemini' : 'Your device'} added ${items.length} item${items.length > 1 ? 's' : ''}, Rp ${money(read)} in total.`
+        ? `${geminiKey() ? 'Gemini' : 'Your device'} added ${items.length} item${items.length > 1 ? 's' : ''}, Rp ${money(sum)} in total.`
         : `Nothing came back from ${reader} — no item lines it could make out, so add them by hand.`,
-      total ? `The struk says its total is Rp ${money(total)} — service, tax and discount make up the difference.` : '',
+      charged.length ? `It also read ${list(charged)}.` : '',
+      // Said only when it was not used, so it is a cross-check rather than a
+      // repeat of the line above.
+      // Added up here rather than through calcShares, which is zero until
+      // somebody is at the table — and at this point in the evening nobody is.
+      charged.length && total != null && !bill.billTotal
+        ? (() => {
+            const adds = bill.items.reduce((a, it) => a + (Number(it.amount) || 0), 0)
+              + (read.service ?? 0) + (read.tax ?? 0) - (read.discount ?? 0);
+            return adds === total
+              ? `That adds up to the Rp ${money(total)} the struk says, so the reading is sound.`
+              : `The struk says Rp ${money(total)}, but the lines and charges read come to Rp ${money(adds)} — something on the paper was missed.`;
+          })()
+        : '',
       kept ? 'The photo goes at the foot of the PDF.' : 'The photo was too big to keep, so the PDF goes without it.',
       KEEP(),
     ].filter(Boolean).join(' '));
@@ -1538,7 +1613,7 @@ const pdfFile = () => new File([buildPdf().output('blob')], fileName('pdf'), { t
 // Drawn icons on one 24 grid at one stroke weight, rather than emoji: an emoji
 // is whatever face the phone happens to ship, at whatever size it likes, and
 // a screen reader reads it out as "page facing up".
-const svg = (inner) => `<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false">${inner}</svg>`;
+const svg = (inner, size = 20) => `<svg viewBox="0 0 24 24" width="${size}" height="${size}" aria-hidden="true" focusable="false">${inner}</svg>`;
 const LINE = 'fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"';
 // WhatsApp's own mark (Simple Icons). The one glyph on this screen that needs
 // no label: it is the app the message is going to.
@@ -1562,6 +1637,12 @@ const FOLDER = svg(`<path ${LINE} d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 
 const DOWNLOAD = svg(`<g ${LINE}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5M12 15V3"/></g>`);
 const APIKEY = svg(`<g ${LINE}><circle cx="7.5" cy="15.5" r="4.5"/><path d="M10.7 12.3L21 2M17.5 5.5l3 3M14.5 8.5l3 3"/></g>`);
 const EYE = svg(`<g ${LINE}><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></g>`);
+// The theme switch, at 14 rather than 20: three marks inside a pill that has to
+// stay the width it was. Auto is the half-lit circle — the same idea as the
+// mark in the corner, and the same idea as the setting: whichever the room is.
+const SUN = svg(`<g ${LINE}><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></g>`, 14);
+const MOON = svg(`<path ${LINE} d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>`, 14);
+const AUTO = svg(`<g ${LINE}><circle cx="12" cy="12" r="9"/><path fill="currentColor" stroke="none" d="M12 3a9 9 0 0 1 0 18z"/></g>`, 14);
 const EYE_OFF = svg(`<g ${LINE}><path d="M17.9 17.9A10.1 10.1 0 0 1 12 20c-7 0-10-8-10-8a18.5 18.5 0 0 1 5.1-5.9M9.9 4.2A9.1 9.1 0 0 1 12 4c7 0 10 8 10 8a18.5 18.5 0 0 1-2.2 3.2m-6.7-1.1a3 3 0 1 1-4.2-4.2"/><path d="M2 2l20 20"/></g>`);
 
 // The words stay the accessible name; the mark is aria-hidden and only leads
@@ -1579,6 +1660,10 @@ for (const [id, glyph] of [
 // The key field's own three marks. The eye is the one thing a password box
 // always needed and never had: a key is pasted, and a key you cannot read is
 // a key you cannot check.
+for (const [name, glyph] of [['auto', AUTO], ['light', SUN], ['dark', MOON]]) {
+  seg.querySelector(`[data-theme=${name}]`)?.insertAdjacentHTML('afterbegin', glyph);
+}
+
 $('geminiField').insertAdjacentHTML('afterbegin', APIKEY);
 const peek = $('geminiPeek');
 const setPeek = (shown) => {

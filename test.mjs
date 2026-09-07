@@ -614,10 +614,23 @@ assert.deepEqual(roundToSum([1142.5, 1142.5], 2285), [1143, 1142]);
 
   // Anything that isn't the expected shape yields nothing, never a throw.
   for (const bad of [null, undefined, {}, { items: null }, { items: 'nope' }, { items: [null, 7, 'x'] }]) {
-    assert.deepEqual(parseGemini(bad), { items: [], total: null }, `must survive ${JSON.stringify(bad)}`);
+    assert.deepEqual(parseGemini(bad), { items: [], total: null, service: null, tax: null, discount: null }, `must survive ${JSON.stringify(bad)}`);
   }
   // A reply longer than any real struk is truncated rather than pasted in whole.
   assert.equal(parseGemini({ items: Array(900).fill({ qty: 1, name: 'Teh', amount: 5000 }) }).items.length, 200);
+
+  // The charges come back as printed. They take a floor of 1, not the items'
+  // 1000: five per cent of a small bill really is a few hundred rupiah, and
+  // dropping it would quietly under-charge the table.
+  {
+    const c = parseGemini({ items: [], total: 265734, service: 750, tax: 1650, discount: 500 });
+    assert.deepEqual([c.total, c.service, c.tax, c.discount], [265734, 750, 1650, 500]);
+    // Zero is "not charged", which is the same as absent — and nonsense is dropped.
+    const z = parseGemini({ items: [], service: 0, tax: -5, discount: 'lots' });
+    assert.deepEqual([z.service, z.tax, z.discount], [null, null, null]);
+    // An item under the floor is still debris.
+    assert.equal(parseGemini({ items: [{ qty: 1, name: 'Teh', amount: 900 }] }).items.length, 0);
+  }
 }
 
 // 4g. The spreadsheet export: whole rupiah as bare numbers so the sheet adds up,
