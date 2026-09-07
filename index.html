@@ -60,7 +60,7 @@
     font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     -webkit-text-size-adjust: 100%; -webkit-tap-highlight-color: transparent;
     /* Room for the fixed bars top and bottom, plus the notch and home indicator. */
-    padding: calc(env(safe-area-inset-top) + 58px) 14px calc(env(safe-area-inset-bottom) + 20px);
+    padding: calc(env(safe-area-inset-top) + 104px) 14px calc(env(safe-area-inset-bottom) + 20px);
     overscroll-behavior-y: contain;
   }
   main, .bar > div { max-width: 620px; margin: 0 auto; }
@@ -78,6 +78,11 @@
   .bar > div { display: flex; align-items: center; gap: 9px; }
 
   .logo { flex: 0 0 auto; color: var(--accent); }
+  /* Second row of the bar: which bill you are in, and the way out of it. Up
+     here because switching bills was a scroll to the foot of the page. */
+  .switch { margin-top: 8px; gap: 8px; }
+  .switch select, .switch button { flex: 0 0 auto; padding: 7px 10px; font-size: 14px; }
+  .switch select { flex: 1 1 auto; }
   h1 { font-size: 17px; margin: 0; letter-spacing: -0.02em; flex: 1; }
   .lede { margin: 0 0 16px; color: var(--muted); font-size: 14px; text-wrap: pretty; }
   section {
@@ -243,6 +248,10 @@
       <button data-theme="light" aria-pressed="false">Light</button>
       <button data-theme="dark" aria-pressed="false">Dark</button>
     </div>
+  </div>
+  <div class="switch">
+    <select id="billPick" aria-label="Open bill"></select>
+    <button id="billReset" title="Clear this bill and start fresh">Clear</button>
   </div>
 </header>
 
@@ -571,7 +580,43 @@ function loadBill(next) {
   renderAll();
 }
 
+// Empty the open bill and leave the shelf alone. The bill being cleared was
+// never on the shelf, so this is the one thing here that loses work — hence the
+// asking. Everything you have kept stays kept.
+function resetBill() {
+  if (!isBlank(bill) && !confirm('Clear this bill and start a fresh one? The other bills stay.')) return;
+  bill = blank();
+  save();
+  paintFields();
+  $('tos').checked = true;
+  renderAll();
+  scrollTo({ top: 0, behavior: still.matches ? 'auto' : 'smooth' });
+}
+$('billReset').onclick = resetBill;
+
+// The picker in the bar is the whole shelf, one tap deep, plus the way to start
+// another bill — so neither costs a scroll to the foot of the page.
+const NEW_BILL = '+new';
+function renderPicker() {
+  const pick = $('billPick');
+  pick.textContent = '';
+  for (const b of [bill, ...shelf]) {
+    pick.append(el('option', {
+      value: b.id, selected: b.id === bill.id,
+      textContent: `${b.title.trim() || 'Untitled bill'} \u00b7 ${fmtDate(b.date)}`,
+    }));
+  }
+  pick.append(el('option', { value: NEW_BILL, textContent: '+ New bill' }));
+}
+$('billPick').onchange = () => {
+  const id = $('billPick').value;
+  if (id === NEW_BILL) return newBill();
+  const next = shelf.find((b) => b.id === id);
+  if (next) loadBill(next);
+};
+
 function renderBills() {
+  renderPicker();
   const box = $('bills');
   box.textContent = '';
   for (const b of [bill, ...shelf]) {
@@ -591,8 +636,8 @@ function renderBills() {
     const drop = el('button', {
       className: 'icon', textContent: '\u2715', title: here ? 'Empty this bill' : `Delete ${b.title.trim() || 'this bill'}`,
       onclick: () => {
-        if (!confirm(here ? 'Clear this bill and start a fresh one?' : `Delete "${b.title.trim() || 'Untitled bill'}"? This cannot be undone.`)) return;
-        if (here) { bill = blank(); save(); paintFields(); $('tos').checked = true; renderAll(); return; }
+        if (here) return resetBill();
+        if (!confirm(`Delete "${b.title.trim() || 'Untitled bill'}"? This cannot be undone.`)) return;
         shelf = shelf.filter((x) => x.id !== b.id);
         writeShelf();
         renderBills();
@@ -606,13 +651,14 @@ function renderBills() {
   }
 }
 
-$('billNew').onclick = () => {
+// The whole page just changed under a button at the foot of it. Go back to the
+// top, where the empty bill starts, rather than leaving you staring at the
+// shelf you have finished with.
+function newBill() {
   loadBill(blank());
-  // The whole page just changed under a button at the foot of it. Go back to
-  // the top, where the empty bill starts, rather than leaving you staring at
-  // the shelf you have finished with.
   scrollTo({ top: 0, behavior: still.matches ? 'auto' : 'smooth' });
-};
+}
+$('billNew').onclick = newBill;
 
 // A file is how a bill moves between phones — and the only copy of it that
 // outlives this browser. It is the bill itself, not a report: it opens back up
@@ -710,7 +756,7 @@ const paintFields = () => {
 paintFields();
 for (const [id, key] of FIELDS) {
   if (MONEY.has(id)) onMoneyInput($(id), (raw) => { bill[key] = raw; save(); renderSummary(); renderCharges(); });
-  else $(id).oninput = () => { bill[key] = $(id).value; save(); $('dateText').textContent = fmtDate(bill.date); renderSummary(); };
+  else $(id).oninput = () => { bill[key] = $(id).value; save(); $('dateText').textContent = fmtDate(bill.date); renderSummary(); renderPicker(); };
 }
 
 // Only a keystroke uncovers the native segments; the tap that opened the
