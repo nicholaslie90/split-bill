@@ -313,8 +313,28 @@
   dialog {
     border: 0; border-radius: 16px; padding: 14px; max-width: min(560px, 94vw);
     background: var(--card); color: var(--ink); box-shadow: var(--shadow);
+    /* A sheet arrives and leaves rather than blinking. @starting-style gives
+       the opening frame something to come from; allow-discrete keeps the dialog
+       in the top layer long enough to be seen leaving, without which display
+       lands at once and there is no exit to animate. A browser with neither
+       drops the whole declaration and shows the sheet the way it always did,
+       which is why the two states are plain opacity and transform. */
+    opacity: 0; transform: scale(.97) translateY(10px);
+    transition: opacity var(--move) var(--ease), transform var(--move) var(--ease),
+                overlay var(--move) var(--ease) allow-discrete,
+                display var(--move) var(--ease) allow-discrete;
   }
-  dialog::backdrop { background: light-dark(rgba(20, 24, 31, .55), rgba(0, 0, 0, .68)); }
+  dialog[open] { opacity: 1; transform: none; }
+  @starting-style { dialog[open] { opacity: 0; transform: scale(.97) translateY(10px); } }
+  dialog::backdrop {
+    background: light-dark(rgba(20, 24, 31, .55), rgba(0, 0, 0, .68));
+    opacity: 0;
+    transition: opacity var(--move) var(--ease),
+                overlay var(--move) var(--ease) allow-discrete,
+                display var(--move) var(--ease) allow-discrete;
+  }
+  dialog[open]::backdrop { opacity: 1; }
+  @starting-style { dialog[open]::backdrop { opacity: 0; } }
   /* A sheet's title is a question, not a section label: it keeps its case. */
   dialog h2 { font-size: 17px; text-transform: none; letter-spacing: -0.01em; color: var(--ink); }
   /* Two ways to have the same numbers, each with its reason under it. Stacked,
@@ -1477,6 +1497,11 @@ const closeCam = () => { stopCam(); if (cam.open) cam.close(); };
 // listen for both rather than trusting either one to be the whole story.
 cam.oncancel = stopCam;
 cam.onclose = stopCam;
+// And a third, because of what is at stake here rather than any doubt about
+// the first two: an Escape this sheet does not hear leaves the camera running,
+// and the indicator light on after the user thinks they are done. Three paths
+// to one idempotent function is the cheapest way to stop caring which fires.
+cam.onkeydown = (e) => { if (e.key === 'Escape') closeCam(); };
 
 $('scan').onclick = async () => {
   // No camera API (or an insecure origin, where the browser hides it): just
@@ -1620,21 +1645,23 @@ async function scanFile(file) {
 
 // The thumbnail says there is a photo; this is for reading the thing. The src
 // is set on the way in rather than kept on the page, so switching bills cannot
-// leave the last bill's struk sitting in the sheet.
+// leave the last bill's struk sitting in the sheet, and a hidden image's
+// bitmap is the browser's to reclaim without being told.
 const strukBox = $('struk');
 $('photoZoom').onclick = () => {
   $('strukBig').src = bill.photo;
+  strukBox.querySelector('.shot').scrollTop = 0; // not where the last read left off
   strukBox.showModal();
 };
 $('strukClose').onclick = () => strukBox.close();
 // A tap on the backdrop lands on the dialog itself, and closing on it is what
 // everybody expects of a picture opened full-screen.
 strukBox.onclick = (e) => { if (e.target === strukBox) strukBox.close(); };
-// Escape said out loud. A dialog is meant to bring this with it, and here it
-// could not be got to fire — neither Escape nor the close event arrived at this
-// one under test. Rather than leave the only keyboard way out resting on that,
-// it is wired. Closing a closed dialog does nothing, so it costs nothing where
-// the browser's own already works.
+// Escape belongs to the dialog and needs nothing written for it. This is the
+// second path anyway: close() on a closed dialog does nothing, so it is free
+// where the native one works and it is the way out where a browser puts the
+// key somewhere else — a sheet holding a full-screen picture should not have
+// exactly one.
 strukBox.onkeydown = (e) => { if (e.key === 'Escape') strukBox.close(); };
 
 // --- summary + sharing ------------------------------------------------------
@@ -2020,7 +2047,10 @@ for (const b of ask.querySelectorAll('[data-style]')) {
   };
 }
 $('askClose').onclick = () => { picked = null; ask.close(); };
-ask.oncancel = () => { picked = null; }; // Esc, which closes the dialog by itself
+ask.oncancel = () => { picked = null; }; // Esc, where the browser delivers it
+// And where it does not. Cancel is the same thing the Close button means, so it
+// goes through that rather than repeating what it does.
+ask.onkeydown = (e) => { if (e.key === 'Escape') $('askClose').click(); };
 
 // The struk's own total, once typed, is doing the job the percentage fields
 // were there for. They are left visible and switched off rather than hidden:
