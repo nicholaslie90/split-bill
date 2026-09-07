@@ -375,11 +375,20 @@
   /* Small enough to be a check rather than a picture: whether there is a photo
      on the bill, and whether it is the right one. Cropped from the top, which
      is where a struk keeps the name of the place. */
-  #photoThumb {
-    flex: 0 0 auto; align-self: center; width: 40px; height: 52px;
-    object-fit: cover; object-position: top;
-    border-radius: 8px; border: 1px solid var(--line); background: var(--chip);
+  #photoZoom {
+    flex: 0 0 auto; align-self: center; width: 40px; height: 52px; padding: 0;
+    border: 1px solid var(--line); border-radius: 8px; background: var(--chip);
+    box-shadow: none; overflow: hidden; cursor: zoom-in;
   }
+  #photoThumb { display: block; width: 100%; height: 100%; object-fit: cover; object-position: top; }
+  /* A struk is tall. Fitting one into a dialog shrinks the print to the size it
+     was already too small at, so it goes in at full width and scrolls — the
+     same bargain the PDF makes on a phone. */
+  #struk .shot {
+    max-height: 76vh; overflow: auto; border-radius: 12px; background: var(--chip);
+    overscroll-behavior: contain;
+  }
+  #struk .shot img { display: block; width: 100%; height: auto; }
   /* The wait. Tesseract counts its own progress and the bar shows the real
      figure; the post to Gemini is one request with no progress events on it at
      all, so rather than invent a number the band sweeps to say "working". */
@@ -502,11 +511,17 @@
          can't tell you that there isn't. Scanning attaches one; so does this,
          without re-reading the items you already have. -->
     <div class="row" id="photoRow" style="margin-top:10px">
-      <img id="photoThumb" alt="" hidden>
+      <button id="photoZoom" type="button" hidden><img id="photoThumb" alt=""></button>
       <p class="hint" id="photoNote" style="flex:1 1 auto"></p>
       <button id="photoDrop" style="flex:0 0 auto"><span></span></button>
     </div>
     <input id="photoPick" type="file" accept="image/*" hidden>
+    <!-- The struk, big enough to read. Another native dialog: backdrop, Esc and
+         focus handling, none of it written here. -->
+    <dialog id="struk" aria-label="The struk photo">
+      <div class="shot"><img id="strukBig" alt="The struk photo"></div>
+      <div class="row" style="margin-top:10px"><button id="strukClose">Close</button></div>
+    </dialog>
     <!-- Optional, and the only thing on this page that ever leaves the device.
          Kept out of the bill so "Start over" and the exports can't carry it. -->
     <div style="margin-top:10px">
@@ -1603,6 +1618,25 @@ async function scanFile(file) {
   }
 }
 
+// The thumbnail says there is a photo; this is for reading the thing. The src
+// is set on the way in rather than kept on the page, so switching bills cannot
+// leave the last bill's struk sitting in the sheet.
+const strukBox = $('struk');
+$('photoZoom').onclick = () => {
+  $('strukBig').src = bill.photo;
+  strukBox.showModal();
+};
+$('strukClose').onclick = () => strukBox.close();
+// A tap on the backdrop lands on the dialog itself, and closing on it is what
+// everybody expects of a picture opened full-screen.
+strukBox.onclick = (e) => { if (e.target === strukBox) strukBox.close(); };
+// Escape said out loud. A dialog is meant to bring this with it, and here it
+// could not be got to fire — neither Escape nor the close event arrived at this
+// one under test. Rather than leave the only keyboard way out resting on that,
+// it is wired. Closing a closed dialog does nothing, so it costs nothing where
+// the browser's own already works.
+strukBox.onkeydown = (e) => { if (e.key === 'Escape') strukBox.close(); };
+
 // --- summary + sharing ------------------------------------------------------
 let result = { people: [], subtotal: 0, service: 0, tax: 0, total: 0 };
 
@@ -1886,7 +1920,9 @@ function renderPhoto() {
   const thumb = $('photoThumb');
   // Never src="" — an empty src is a request for the page itself.
   if (bill.photo) thumb.src = bill.photo; else thumb.removeAttribute('src');
-  thumb.hidden = !bill.photo;
+  $('photoZoom').hidden = !bill.photo;
+  $('photoZoom').title = 'See the struk';
+  $('photoZoom').setAttribute('aria-label', 'See the struk');
   $('photoDrop').classList.add('ico');
   $('photoDrop').innerHTML = (bill.photo ? CROSS : IMAGE) +
     `<span>${bill.photo ? 'Remove photo' : 'Add photo'}</span>`;
