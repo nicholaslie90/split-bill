@@ -83,8 +83,60 @@
   /* .bar > div already sets `margin: 0 auto` and outranks a bare .switch, so
      the gap between the two rows has to be set at that weight or higher. */
   .bar > .switch { margin: 10px auto 0; gap: 8px; }
-  .switch select, .switch button { flex: 0 0 auto; padding: 7px 10px; font-size: 14px; }
-  .switch select { flex: 1 1 auto; padding-inline-end: 34px; }
+  /* Direct children only: the bar's own two controls, not every button inside
+     the panel that drops out of one of them. */
+  .switch > button { flex: 0 0 auto; padding: 7px 10px; font-size: 14px; }
+  .picker { position: relative; flex: 1 1 auto; min-width: 0; }
+  /* Wearing the box the native select used to wear, because that is what it
+     still is: the name of the bill you are in, and a way to the rest. */
+  .picker > button {
+    width: 100%; text-align: left; font-size: 14px; padding: 7px 10px;
+    background-color: var(--bg); border: 1px solid var(--line); border-radius: 11px;
+    box-shadow: none; overflow: hidden;
+  }
+  .picker > button span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .picker > button:active { transform: none; }
+  .picker > button[aria-expanded=true] { border-color: var(--accent); }
+  /* The shelf itself, hung under the bar. A native select could show the names
+     and nothing else; every bill here carries what it came to and its own way
+     out, which is what the list at the foot of the page used to be for. */
+  #billMenu {
+    position: absolute; top: calc(100% + 6px); left: 0; right: 0; z-index: 1;
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+    box-shadow: var(--shadow); overflow: hidden auto; max-height: min(62vh, 420px);
+  }
+  #billMenu:not([hidden]) { animation: drop var(--move) var(--ease); }
+  @keyframes drop { from { opacity: 0; transform: translateY(-6px); } }
+  .billrow { display: flex; align-items: center; border-top: 1px solid var(--line); }
+  .billrow:first-child { border-top: 0; }
+  .billrow.here { background: var(--chip); }
+  .billopen {
+    flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 10px;
+    justify-content: space-between; text-align: left;
+    background: none; border: 0; border-radius: 0; box-shadow: none; padding: 9px 6px 9px 11px;
+  }
+  .billopen:active { transform: none; background: var(--chip); }
+  .billopen > div { min-width: 0; }
+  /* Both lines truncate rather than wrap. Left to wrap, the date and head
+     count ran a second line underneath the figure at phone width. */
+  .billopen b, .billopen .hint { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .billsum { font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  /* The one destructive thing in here. It keeps its distance from the row that
+     opens the bill, and it gives up the filled box: a grey tile beside every
+     total was the loudest mark on a row whose point is the figure. */
+  .billrow > .icon, .billrow > .nodrop { flex: 0 0 auto; margin-right: 6px; }
+  .billrow > .icon { background: none; border-color: transparent; box-shadow: none; }
+  .billrow > .icon:hover, .billrow > .icon:focus-visible { background: var(--chip); }
+  /* The open bill has no cross, but it keeps the width of one, so the figures
+     line up as a column down the panel — which is the whole point of setting
+     them in tabular numerals. */
+  .billrow > .nodrop { width: 36px; }
+  .billnew {
+    display: block; width: 100%; text-align: left; padding: 11px;
+    background: none; border: 0; border-top: 1px solid var(--line); border-radius: 0;
+    box-shadow: none; color: var(--accent); font-weight: 600;
+  }
+  .billnew:active { transform: none; background: var(--chip); }
   h1 { font-size: 17px; margin: 0; letter-spacing: -0.02em; flex: 1; }
   .lede { margin: 0 0 16px; color: var(--muted); font-size: 14px; text-wrap: pretty; }
   section {
@@ -136,7 +188,7 @@
      other side, and in the same muted ink as every other quiet mark. The plain
      declaration goes first: a browser that will not take light-dark() for an
      image drops the second line and still gets a chevron. */
-  select {
+  select, .chev {
     appearance: none;
     padding-inline-end: 34px;
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='11' height='7' viewBox='0 0 11 7'%3E%3Cpath d='M1 1l4.5 4.5L10 1' fill='none' stroke='%237f8b9c' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
@@ -306,7 +358,10 @@
     </div>
   </div>
   <div class="switch">
-    <select id="billPick" aria-label="Open bill"></select>
+    <div class="picker">
+      <button id="billPick" class="chev" aria-expanded="false" aria-controls="billMenu"><span id="billNow"></span></button>
+      <div id="billMenu" hidden></div>
+    </div>
     <button id="billReset" title="Clear this bill and start fresh">Clear</button>
   </div>
 </header>
@@ -453,14 +508,13 @@
 
   <section class="quiet">
     <h2>Bills</h2>
-    <div id="bills"></div>
-    <div class="row" style="margin-top:12px"><button id="billNew">+ New bill</button></div>
+    <div class="row"><button id="billNew">+ New bill</button></div>
     <div class="row" style="margin-top:8px">
       <button id="billOpen">Open a file…</button>
       <button id="billSave">Save as file</button>
     </div>
     <input id="billFile" type="file" accept="application/json,.json" hidden>
-    <p class="hint" style="margin-top:6px">Every bill here stays in this browser. Saving one as a file is how it moves to another phone, or how you keep it after this browser forgets.</p>
+    <p class="hint" style="margin-top:6px">Every bill is in the picker at the top of the page, and stays in this browser. Saving one as a file is how it moves to another phone, or how you keep it after this browser forgets.</p>
   </section>
 
   <!-- Asked at the moment the PDF is wanted, not kept on the page all day.
@@ -651,61 +705,69 @@ function resetBill() {
 }
 $('billReset').onclick = resetBill;
 
-// The picker in the bar is the whole shelf, one tap deep, plus the way to start
-// another bill — so neither costs a scroll to the foot of the page.
-const NEW_BILL = '+new';
-function renderPicker() {
-  const pick = $('billPick');
-  pick.textContent = '';
-  for (const b of [bill, ...shelf]) {
-    pick.append(el('option', {
-      value: b.id, selected: b.id === bill.id,
-      textContent: `${b.title.trim() || 'Untitled bill'} \u00b7 ${fmtDate(b.date)}`,
-    }));
-  }
-  pick.append(el('option', { value: NEW_BILL, textContent: '+ New bill' }));
-}
-$('billPick').onchange = () => {
-  const id = $('billPick').value;
-  if (id === NEW_BILL) return newBill();
-  const next = shelf.find((b) => b.id === id);
-  if (next) loadBill(next);
+// The shelf, in the bar. It was a list at the foot of the page and a native
+// select up here that could only show the names; now there is one of it, and it
+// carries what a bill came to and its own way out. Deleting a bill no longer
+// means opening it first.
+const menu = $('billMenu'), trigger = $('billPick');
+const showMenu = (on) => {
+  menu.hidden = !on;
+  trigger.setAttribute('aria-expanded', String(on));
+  if (on) menu.querySelector('button')?.focus();
 };
+trigger.onclick = () => showMenu(menu.hidden);
+// Escape and a tap anywhere else: the only two things the native select was
+// still doing for free, and the only two this has to bring itself.
+addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !menu.hidden) { showMenu(false); trigger.focus(); }
+});
+addEventListener('pointerdown', (e) => {
+  if (!menu.hidden && !menu.contains(e.target) && !trigger.contains(e.target) && e.target !== trigger) showMenu(false);
+}, true);
 
-function renderBills() {
-  renderPicker();
-  const box = $('bills');
-  box.textContent = '';
+function renderPicker() {
+  const named = (b) => b.title.trim() || 'Untitled bill';
+  $('billNow').textContent = `${named(bill)} \u00b7 ${fmtDate(bill.date)}`;
+  menu.textContent = '';
   for (const b of [bill, ...shelf]) {
     const here = b.id === bill.id;
     const heads = b.participants.length;
-    const left = el('div', {}, [
-      el('b', { textContent: b.title.trim() || 'Untitled bill' }),
-      here ? el('span', { className: 'hint', textContent: ' \u00b7 open now' }) : null,
-      el('div', { className: 'hint', textContent:
-        [fmtDate(b.date), heads ? `${heads} ${heads === 1 ? 'person' : 'people'}` : ''].filter(Boolean).join(' \u00b7 ') || 'Nothing in it yet' }),
+    const open = el('button', {
+      className: 'billopen',
+      title: here ? `${named(b)} is the bill you are in` : `Open ${named(b)}`,
+      onclick: () => { showMenu(false); if (here) trigger.focus(); else loadBill(b); },
+    }, [
+      el('div', {}, [
+        el('b', { textContent: named(b) }),
+        el('div', { className: 'hint', textContent:
+          [fmtDate(b.date), heads ? `${heads} ${heads === 1 ? 'person' : 'people'}` : '', here ? 'open now' : '']
+            .filter(Boolean).join(' \u00b7 ') }),
+      ]),
+      el('span', { className: 'billsum', textContent: `Rp ${money(calcShares(b).total)}` }),
     ]);
-    const open = here ? null : el('button', {
-      textContent: 'Open', title: `Open ${b.title.trim() || 'this bill'}`,
-      onclick: () => loadBill(b),
-    });
-    // The open bill can be emptied but not removed: there is always one.
-    const drop = el('button', {
-      className: 'icon', textContent: '\u2715', title: here ? 'Empty this bill' : `Delete ${b.title.trim() || 'this bill'}`,
-      onclick: () => {
-        if (here) return resetBill();
-        if (!confirm(`Delete "${b.title.trim() || 'Untitled bill'}"? This cannot be undone.`)) return;
-        shelf = shelf.filter((x) => x.id !== b.id);
-        writeShelf();
-        renderBills();
-      },
-    });
-    const right = el('div', { style: 'text-align:right; white-space:nowrap' }, [
-      el('div', {}, [el('b', { textContent: `Rp ${money(calcShares(b).total)}` })]),
-      el('div', { style: 'margin-top:6px; display:flex; gap:6px; justify-content:flex-end; align-items:center' }, [open, drop]),
-    ]);
-    box.append(el('div', { className: 'share' }, [left, right]));
+    const row = el('div', { className: here ? 'billrow here' : 'billrow' }, [open]);
+    // The open bill has no cross: there is always one open, and Clear beside
+    // the picker is what empties it. Everything on the shelf can go.
+    if (here) {
+      row.append(el('span', { className: 'nodrop', ariaHidden: 'true' }));
+    } else {
+      row.append(el('button', {
+        className: 'icon', textContent: '\u2715', title: `Delete ${named(b)}`,
+        onclick: () => {
+          if (!confirm(`Delete "${named(b)}"? This cannot be undone.`)) return;
+          shelf = shelf.filter((x) => x.id !== b.id);
+          writeShelf();
+          renderPicker();
+          menu.querySelector('button')?.focus(); // the row under the one just removed
+        },
+      }));
+    }
+    menu.append(row);
   }
+  menu.append(el('button', {
+    className: 'billnew', textContent: '+ New bill',
+    onclick: () => { showMenu(false); newBill(); },
+  }));
 }
 
 // The whole page just changed under a button at the foot of it. Go back to the
@@ -1696,7 +1758,7 @@ function renderCharges() {
       : `Rp ${money(-result.service)} less than the items${rate}, taken off them in proportion. The fields below are switched off while this has a figure in it.`;
 }
 
-function renderAll() { renderPeople(); renderItems(); renderSummary(); renderCharges(); renderPhoto(); renderPays(); renderBills(); }
+function renderAll() { renderPeople(); renderItems(); renderSummary(); renderCharges(); renderPhoto(); renderPays(); renderPicker(); }
 renderAll();
 
 // --- PDF -------------------------------------------------------------------
