@@ -372,6 +372,32 @@
   .field button:hover, .field button:focus-visible { color: var(--ink); background: var(--chip); }
   .field button[aria-pressed=true] { color: var(--accent); }
   .field button:active { transform: none; }
+  /* Small enough to be a check rather than a picture: whether there is a photo
+     on the bill, and whether it is the right one. Cropped from the top, which
+     is where a struk keeps the name of the place. */
+  #photoThumb {
+    flex: 0 0 auto; align-self: center; width: 40px; height: 52px;
+    object-fit: cover; object-position: top;
+    border-radius: 8px; border: 1px solid var(--line); background: var(--chip);
+  }
+  /* The wait. Tesseract counts its own progress and the bar shows the real
+     figure; the post to Gemini is one request with no progress events on it at
+     all, so rather than invent a number the band sweeps to say "working". */
+  .prog { margin-top: 10px; height: 4px; border-radius: 999px; background: var(--chip); overflow: hidden; }
+  .prog > i {
+    display: block; height: 100%; width: 0; border-radius: 999px; background: var(--accent);
+    transition: width var(--move) var(--ease);
+  }
+  /* Not --ease: that curve is for arrivals, and ease-out on a loop darts across
+     and then crawls at the far edge, so the band is off-screen most of the
+     time. A sweep wants a symmetric one — in and out at the same rate. */
+  .prog.busy > i { width: 38%; animation: sweep 1.15s cubic-bezier(.65, 0, .35, 1) infinite; }
+  @keyframes sweep { from { transform: translateX(-100%); } to { transform: translateX(263%); } }
+  /* A swept band that cannot sweep is an invisible bar, and the wait is the one
+     moment the page has to look busy. It sits still and full instead. */
+  @media (prefers-reduced-motion: reduce) {
+    .prog.busy > i { width: 100%; animation: none; opacity: .55; }
+  }
   .hint { color: var(--muted); font-size: 13px; margin: 0; }
   .share { display: flex; justify-content: space-between; gap: 8px; padding: 9px 0; border-top: 1px dashed var(--line); }
   .share:first-of-type { border-top: 0; }
@@ -469,12 +495,14 @@
         <button id="camClose">Cancel</button>
       </div>
     </dialog>
+    <div class="prog" id="scanProg" role="progressbar" aria-label="Reading the receipt" hidden><i></i></div>
     <p class="hint" id="scanNote" style="margin-top:8px" aria-live="polite"></p>
     <!-- Always here, whether or not a photo is attached: the struk is invisible
          until the PDF is opened, and a row that appears only when there is one
          can't tell you that there isn't. Scanning attaches one; so does this,
          without re-reading the items you already have. -->
     <div class="row" id="photoRow" style="margin-top:10px">
+      <img id="photoThumb" alt="" hidden>
       <p class="hint" id="photoNote" style="flex:1 1 auto"></p>
       <button id="photoDrop" style="flex:0 0 auto"><span></span></button>
     </div>
@@ -1202,7 +1230,28 @@ const loadOcr = () => (ocr ??= new Promise((ok, fail) => {
 }));
 
 const note = (text) => { $('scanNote').textContent = text; };
-const progress = (m) => { if (m.status === 'recognizing text') note(`Reading the receipt… ${Math.round(m.progress * 100)}%`); };
+// A fraction when there is a real one to show, null for "working, and nobody
+// knows how far" — decoding the photo, fetching eight megabytes of scanner, or
+// waiting on a single POST to Gemini that reports nothing until it answers.
+// Never a made-up number: a bar that fills to 90% and sits there is a lie the
+// user has to wait out anyway.
+const showProg = (at) => {
+  const p = $('scanProg');
+  p.hidden = at === false;
+  p.classList.toggle('busy', at == null);
+  if (at == null || at === false) {
+    p.removeAttribute('aria-valuenow');
+    p.firstElementChild.style.width = '';
+  } else {
+    p.setAttribute('aria-valuenow', String(Math.round(at * 100)));
+    p.firstElementChild.style.width = `${Math.round(at * 100)}%`;
+  }
+};
+const progress = (m) => {
+  if (m.status !== 'recognizing text') return;
+  showProg(m.progress);
+  note(`Reading the receipt… ${Math.round(m.progress * 100)}%`);
+};
 
 // One worker, kept alive, so scanning a second struk doesn't reload the engine.
 let worker;
@@ -1363,6 +1412,7 @@ const GEMINI_CONFIG = {
 
 async function readWithGemini(shot) {
   note('Sending the photo to Gemini…');
+  showProg(null);
   const res = await fetch(GEMINI_URL, {
     method: 'POST',
     // A header, never a query string — a key in a URL ends up in logs and history.
@@ -1456,6 +1506,7 @@ $('shot').onchange = () => {
 // still what the app falls back to if a scan is refused.
 async function readHere(shot) {
   note('Loading the scanner — a one-time download of about 8 MB…');
+  showProg(null);
   const w = await getWorker();
   // ponytail: one pass, one page-segmentation mode. A curled struk can still
   // hand a row's price to the dish above it; reading the word boxes and
@@ -1470,6 +1521,7 @@ async function scanFile(file) {
   // enough on a phone to look like nothing happened at all, and the reader's
   // own first word comes only after it.
   note('Reading the photo…');
+  showProg(null);
   try {
     const shot = await prepare(file);
     // The paper goes on the bill before the reading is attempted, not after.
@@ -1546,6 +1598,7 @@ async function scanFile(file) {
     note([e.message, bill.photo ? 'The photo is on the bill, at the foot of the PDF.' : '', KEEP()]
       .filter(Boolean).join(' '));
   } finally {
+    showProg(false);
     $('scan').disabled = false;
   }
 }
@@ -1830,6 +1883,10 @@ function renderPhoto() {
   $('photoNote').textContent = bill.photo
     ? `Struk photo attached, ${kb} KB — it goes at the foot of the PDF.`
     : 'No struk photo — the PDF will be just the numbers.';
+  const thumb = $('photoThumb');
+  // Never src="" — an empty src is a request for the page itself.
+  if (bill.photo) thumb.src = bill.photo; else thumb.removeAttribute('src');
+  thumb.hidden = !bill.photo;
   $('photoDrop').classList.add('ico');
   $('photoDrop').innerHTML = (bill.photo ? CROSS : IMAGE) +
     `<span>${bill.photo ? 'Remove photo' : 'Add photo'}</span>`;
