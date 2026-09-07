@@ -84,13 +84,31 @@
      the gap between the two rows has to be set at that weight or higher. */
   .bar > .switch { margin: 10px auto 0; gap: 8px; }
   .switch select, .switch button { flex: 0 0 auto; padding: 7px 10px; font-size: 14px; }
-  .switch select { flex: 1 1 auto; }
+  .switch select { flex: 1 1 auto; padding-inline-end: 34px; }
   h1 { font-size: 17px; margin: 0; letter-spacing: -0.02em; flex: 1; }
   .lede { margin: 0 0 16px; color: var(--muted); font-size: 14px; text-wrap: pretty; }
   section {
     background: var(--card); border: 1px solid var(--line); border-radius: 16px;
-    padding: 14px; margin-bottom: 14px; box-shadow: var(--shadow);
+    padding: 14px; margin-bottom: 12px; box-shadow: var(--shadow);
   }
+  /* Eight identical cards told you nothing about which one mattered. There are
+     three movements here — what the bill is, the work of typing it in, and the
+     answer the work was for — and the page now says so before a word is read.
+     The working sections stay shoulder to shoulder as the peers they are. */
+  /* Not work: the bill's own name at the top, and the shelf of old ones at the
+     foot. They give up the card and sit on the page itself, so the eye starts
+     and finishes outside the thing it has to fill in. */
+  section.quiet {
+    background: none; border-color: transparent; box-shadow: none;
+    padding: 0; margin-bottom: 18px;
+  }
+  /* The answer. Given the room, an accent heading, and the only figure on the
+     page bigger than the total — because a share is what actually gets sent. */
+  section.result {
+    margin: 28px 0; border-color: light-dark(#c6e0dc, #2c524d);
+  }
+  section.result > h2 { color: var(--accent); }
+  .share .due b { font-size: 18px; font-weight: 700; letter-spacing: -0.02em; }
   h2 {
     font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 10px;
     display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
@@ -112,6 +130,20 @@
     width: 100%; padding: 10px 11px; border: 1px solid var(--line); border-radius: 11px;
     background: var(--bg); min-width: 0;
     transition: border-color var(--tap) var(--ease), background-color var(--tap) var(--ease);
+  }
+  /* The native arrow is drawn hard against the border and takes no notice of
+     the padding, so it is drawn here instead — inset like the text on the
+     other side, and in the same muted ink as every other quiet mark. The plain
+     declaration goes first: a browser that will not take light-dark() for an
+     image drops the second line and still gets a chevron. */
+  select {
+    appearance: none;
+    padding-inline-end: 34px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='11' height='7' viewBox='0 0 11 7'%3E%3Cpath d='M1 1l4.5 4.5L10 1' fill='none' stroke='%237f8b9c' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-image: light-dark(url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='11' height='7' viewBox='0 0 11 7'%3E%3Cpath d='M1 1l4.5 4.5L10 1' fill='none' stroke='%23667085' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"), url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='11' height='7' viewBox='0 0 11 7'%3E%3Cpath d='M1 1l4.5 4.5L10 1' fill='none' stroke='%2398a2b3' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"));
+    background-repeat: no-repeat;
+    background-position: right 10px center; /* the chevron's edge lands where the text's does */
+    background-size: 11px 7px;
   }
   input:focus, select:focus { border-color: var(--accent); }
   /* The caret and the selection are part of typing and ship in nobody's
@@ -226,7 +258,10 @@
   .person input[type=checkbox] { flex: 0 0 auto; width: 20px; height: 20px; accent-color: var(--accent); }
   .item { border-top: 1px solid var(--line); padding-top: 10px; margin-top: 10px; }
   .item:first-child { border-top: 0; padding-top: 0; margin-top: 0; }
-  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  /* pan-y hands the vertical scroll back to the browser and keeps the sideways
+     drag for tagging; without user-select a drag across the row selects the
+     names instead of tagging them. */
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; touch-action: pan-y; user-select: none; }
   .chip {
     padding: 6px 12px; border-radius: 999px; background: var(--chip);
     border: 1px solid transparent; font-size: 13px; cursor: pointer;
@@ -279,7 +314,7 @@
 <main>
   <p class="lede">Tag who shared each item, then send everyone their share on WhatsApp.</p>
 
-  <section>
+  <section class="quiet">
     <div class="grid2">
       <div><label for="title">What / where</label><input id="title" type="text" placeholder="Dinner at Sate Khas" maxlength="80" spellcheck="false" autocomplete="off"></div>
       <div><label for="date">Date</label>
@@ -298,6 +333,7 @@
   <section>
     <h2>Items<span class="tally" id="itemSum" hidden></span></h2>
     <div id="items"></div>
+    <p class="hint" style="margin-top:10px">Tap a name to tag it, tap again for a second share of the same line, or drag sideways across several to tag them all at once.</p>
     <div class="row" style="margin-top:10px">
       <button id="addItem">+ Add item</button>
       <button id="scan">📷 Scan a receipt</button>
@@ -397,7 +433,7 @@
     <p class="hint" style="margin-top:6px">Optional, and as many as you like — a bank account, an e-wallet, a QRIS name. All of them go into every WhatsApp message and the PDF, so people can pick whichever they have.</p>
   </section>
 
-  <section>
+  <section class="result">
     <h2>Who pays what</h2>
     <div id="summary"></div>
     <p id="say" class="sr" role="status" aria-live="polite"></p>
@@ -415,7 +451,7 @@
     </div>
   </section>
 
-  <section>
+  <section class="quiet">
     <h2>Bills</h2>
     <div id="bills"></div>
     <div class="row" style="margin-top:12px"><button id="billNew">+ New bill</button></div>
@@ -926,20 +962,30 @@ function renderItems() {
     // Tagging repaints only this chip row, never the whole list — the colour
     // transition survives, and whatever you were typing keeps its focus.
     const chips = el('div', { className: 'chips' });
+    const tookBy = (p) => item.sharedBy.filter((x) => x === p).length;
+    // Rebuilt in participant order, so the tally reads the same whichever order
+    // the chips were tapped in.
+    const setTook = (p, n) => {
+      item.sharedBy = bill.participants.flatMap((q) => Array(q === p ? n : tookBy(q)).fill(q));
+    };
     const paintChips = () => {
       chips.textContent = '';
       if (!bill.participants.length) {
         chips.append(el('p', { className: 'hint', textContent: 'Add participants to tag this item.' }));
         return;
       }
-      const tag = (text, on, toggle) => {
+      const tag = (text, on, who, toggle) => {
         const chip = el('button', { className: 'chip', textContent: text, onclick: () => {
+          // The click that ends a drag would cycle the chip the finger came
+          // down on a second time. The drag has already had its say.
+          if (swallow) { swallow = false; return; }
           toggle(); save(); paintChips(); renderSummary();
         } });
         chip.setAttribute('aria-pressed', String(on));
+        if (who != null) chip.dataset.who = who;
         chips.append(chip);
       };
-      tag('Everyone', !item.sharedBy.length, () => { item.sharedBy = []; });
+      tag('Everyone', !item.sharedBy.length, null, () => { item.sharedBy = []; });
       // Tapping a chip again buys another share of the line rather than undoing
       // the first — "Nic-Cin had two of the four lychee teas" is four taps, no
       // new control, and one more tap takes them back off it.
@@ -948,16 +994,65 @@ function renderItems() {
       // more shares than there are people at the table wants two item rows.
       const most = Math.max(3, bill.participants.length);
       for (const p of bill.participants) {
-        const took = item.sharedBy.filter((x) => x === p).length;
-        tag(took > 1 ? `${p} \u00d7${took}` : p, took > 0, () => {
-          const next = took >= most ? 0 : took + 1;
-          // Rebuilt in participant order, so the tally reads the same whichever
-          // order the chips were tapped in.
-          item.sharedBy = bill.participants.flatMap((q) =>
-            Array((q === p ? next : item.sharedBy.filter((x) => x === q).length)).fill(q));
+        const took = tookBy(p);
+        tag(took > 1 ? `${p} \u00d7${took}` : p, took > 0, p, () => {
+          setTook(p, took >= most ? 0 : took + 1);
         });
       }
     };
+
+    // A tap is one person; a drag is the table. The chip the finger goes down
+    // on sets the direction — off it turns people on, on it turns them off —
+    // and every chip the finger crosses takes that same state. Four people
+    // shared the pizza in one swipe rather than four taps, and the quantity
+    // cycling stays where it was, on the tap.
+    //
+    // Only the sideways gesture is taken: touch-action leaves pan-y to the
+    // browser, so a thumb pulling the page up through a wall of chips still
+    // scrolls it. Everyone is not a person and takes no paint.
+    let paint = null, swallow = false;
+    chips.onpointerdown = (e) => {
+      swallow = false;
+      const who = e.target.closest('.chip')?.dataset.who;
+      if (who == null) return;
+      paint = { who, on: !item.sharedBy.includes(who), x: e.clientX, y: e.clientY, moved: false };
+    };
+    chips.onpointermove = (e) => {
+      if (!paint) return;
+      // Only the chip that changed, and only its own two attributes. Redrawing
+      // the row would take the element out from under the finger, and a
+      // captured pointer whose target leaves the page hands the gesture back to
+      // the browser — the drag would stop at the first chip it crossed.
+      const apply = (who) => {
+        if (who == null || item.sharedBy.includes(who) === paint.on) return;
+        setTook(who, paint.on ? 1 : 0);
+        save();
+        const chip = chips.querySelector(`.chip[data-who="${CSS.escape(who)}"]`);
+        if (chip) { chip.setAttribute('aria-pressed', String(paint.on)); chip.textContent = who; }
+        renderSummary();
+      };
+      // No tap is perfectly still. Painting waits until the finger has gone far
+      // enough to have meant it, then catches up on the chip it started from.
+      if (!paint.moved) {
+        if (Math.hypot(e.clientX - paint.x, e.clientY - paint.y) < 10) return;
+        paint.moved = true;
+        apply(paint.who);
+      }
+      // Read from the page, not from the event: repainting replaces the chip
+      // under the finger every time one flips.
+      apply(document.elementFromPoint(e.clientX, e.clientY)?.closest('.chip')?.dataset.who);
+    };
+    // Everyone and the quantity labels are only right again once the drag is
+    // over, so the row is redrawn then — with the finger already lifted.
+    const endPaint = () => {
+      const painted = paint?.moved ?? false;
+      swallow = painted;
+      paint = null;
+      if (painted) paintChips();
+    };
+    chips.onpointerup = endPaint;
+    chips.onpointercancel = endPaint;
+
     paintChips();
 
     box.append(el('div', { className: 'item' }, [el('div', { className: 'row' }, [name, amount, del]), chips]));
@@ -1457,7 +1552,7 @@ function renderSummary() {
       : iconButton('wa', COPY, `Copy ${p.name}'s message`, () => copyMessage());
 
     const right = el('div', { style: 'text-align:right; white-space:nowrap' }, [
-      el('div', {}, [el('b', { textContent: `Rp ${money(p.total)}` })]),
+      el('div', { className: 'due' }, [el('b', { textContent: `Rp ${money(p.total)}` })]),
       payer ? el('div', { className: 'hint', textContent: `gets back Rp ${money(collect(result, p.name).due)}` }) : null,
       el('div', { style: 'margin-top:6px; display:flex; gap:6px; justify-content:flex-end' }, [send, withFile]),
     ]);
