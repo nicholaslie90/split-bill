@@ -91,7 +91,21 @@
     background: var(--card); border: 1px solid var(--line); border-radius: 16px;
     padding: 14px; margin-bottom: 14px; box-shadow: var(--shadow);
   }
-  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 10px; }
+  h2 {
+    font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 10px;
+    display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
+  }
+  /* The running figure in a heading. It is why the typing is worth doing: every
+     amount entered moves a number a few pixels above the box it was typed in,
+     so a mistyped zero is caught where it was made rather than at the foot of
+     the page. It lands rather than appears — the one bit of motion in here,
+     and the reduced-motion rule at the end of this sheet takes it away. */
+  .tally {
+    font-size: 13px; font-weight: 600; letter-spacing: -0.01em; text-transform: none;
+    color: var(--ink); font-variant-numeric: tabular-nums; white-space: nowrap;
+  }
+  .tally.land { animation: land var(--move) var(--ease); }
+  @keyframes land { from { transform: translateY(-3px); color: var(--accent); } }
   label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
   input, button, select { font: inherit; color: inherit; }
   input[type=text], input[type=number], input[type=date], input[type=tel], select {
@@ -99,7 +113,12 @@
     background: var(--bg); min-width: 0;
     transition: border-color var(--tap) var(--ease), background-color var(--tap) var(--ease);
   }
-  input:focus { border-color: var(--accent); }
+  input:focus, select:focus { border-color: var(--accent); }
+  /* The caret and the selection are part of typing and ship in nobody's
+     palette by default. They are the two things you stare at while filling
+     this in, so they get the accent like everything else. */
+  input, select { caret-color: var(--accent); }
+  ::selection { background: light-dark(rgba(15, 118, 110, .18), rgba(45, 212, 191, .26)); }
   /* The date field keeps the native picker but wears a readable face: "29 Jul 2026"
      sits over the browser's own 07/29/2026 — whichever way round that browser
      happens to put it — and steps aside only once somebody actually types into
@@ -262,7 +281,7 @@
 
   <section>
     <div class="grid2">
-      <div><label for="title">What / where</label><input id="title" type="text" placeholder="Dinner at Sate Khas" maxlength="80"></div>
+      <div><label for="title">What / where</label><input id="title" type="text" placeholder="Dinner at Sate Khas" maxlength="80" spellcheck="false" autocomplete="off"></div>
       <div><label for="date">Date</label>
         <div class="datefield"><input id="date" type="date"><span id="dateText" aria-hidden="true"></span></div>
       </div>
@@ -270,14 +289,14 @@
   </section>
 
   <section>
-    <h2>Participants</h2>
+    <h2>Participants<span class="tally" id="headCount" hidden></span></h2>
     <div id="people"></div>
     <button id="addPerson">+ Add participant</button>
     <p class="hint" style="margin-top:8px">Phone is optional — leave it blank and WhatsApp will ask you who to send to. Tick the box to mark who paid the whole bill up front. Each person then gets two buttons: the message on its own, or the message and the bill as a PDF.</p>
   </section>
 
   <section>
-    <h2>Items</h2>
+    <h2>Items<span class="tally" id="itemSum" hidden></span></h2>
     <div id="items"></div>
     <div class="row" style="margin-top:10px">
       <button id="addItem">+ Add item</button>
@@ -745,6 +764,33 @@ const swipeOut = (node) => (still.matches || !node?.animate
       // the delete still has to happen.
       .finished.catch(() => {}));
 
+// Enter means "the next thing I would type": along the row, then down into the
+// row below, and at the foot of a list the row that is not there yet. A struk
+// of fifteen lines goes in without a thumb ever leaving the keyboard.
+//
+// Which box comes next is worked out from the page at the moment the key goes
+// down, never remembered: committing a rename redraws the whole list under you
+// between the keypress and the focus, so a reference held from before would
+// point at a node that is no longer on the page. A position survives that.
+function typeAhead(box, add) {
+  box.addEventListener('keydown', (e) => {
+    const fields = () => [...box.querySelectorAll('input:not([type=checkbox])')];
+    if (e.key !== 'Enter' || !fields().includes(e.target)) return;
+    e.preventDefault();
+    const at = fields().indexOf(e.target);
+    // Asked before the blur, because the blur can take this row's DOM with it.
+    const row = e.target.closest('.person, .item');
+    const started = [...row.querySelectorAll('input:not([type=checkbox])')].some((f) => f.value.trim());
+    e.target.blur(); // lets a rename commit, and its redraw happen, first
+    const next = fields()[at + 1];
+    if (next) next.focus();
+    // Nothing in this row yet: Enter was somebody putting the keyboard away,
+    // not asking for another empty row. The add button does the rest itself —
+    // the entrance animation and the cursor in the new box included.
+    else if (started) add.click();
+  });
+}
+
 // The row just added is the only one that animates in — a re-render of the
 // whole list must not replay every entrance.
 const markNew = (boxId, sel) => $(boxId).querySelector(`${sel}:last-of-type`)?.classList.add('enter');
@@ -790,8 +836,14 @@ function renderPeople() {
     const nameIn = el('input', {
       type: 'text', value: auto ? '' : name, placeholder: auto ? name : 'Name',
       maxLength: 40, ariaLabel: 'Participant name',
+      // A name is not a sentence and not a word the dictionary knows: capitals
+      // where a phone would put them, and no red underline under "Cin".
+      autocapitalize: 'words', spellcheck: false, autocomplete: 'off',
+      enterKeyHint: 'next',
     });
-    const phoneIn = el('input', { type: 'tel', value: bill.phones[name] ?? '', placeholder: 'Phone (optional)', maxLength: 24, ariaLabel: 'Phone number, optional' });
+    // autocomplete off deliberately: the browser's saved number is yours, and
+    // this box is for the person sitting opposite.
+    const phoneIn = el('input', { type: 'tel', value: bill.phones[name] ?? '', placeholder: 'Phone (optional)', maxLength: 24, ariaLabel: 'Phone number, optional', autocomplete: 'off', enterKeyHint: 'next' });
     // Renaming moves the phone and retags every item, so nobody silently loses their share.
     nameIn.onchange = () => {
       const next = nameIn.value.trim();
@@ -845,17 +897,22 @@ $('addPerson').onclick = () => {
   // is type a name.
   $('people').querySelector('.person:last-of-type input')?.focus();
 };
+typeAhead($('people'), $('addPerson'));
 
 // --- items -----------------------------------------------------------------
 function renderItems() {
   const box = $('items');
   box.textContent = '';
   bill.items.forEach((item, i) => {
-    const name = el('input', { type: 'text', value: item.name, placeholder: 'Item', maxLength: 60, ariaLabel: 'Item name' });
+    const name = el('input', {
+      type: 'text', value: item.name, placeholder: 'Item', maxLength: 60, ariaLabel: 'Item name',
+      autocapitalize: 'words', spellcheck: false, autocomplete: 'off', enterKeyHint: 'next',
+    });
     name.oninput = () => { item.name = name.value; save(); renderSummary(); };
     const amount = el('input', {
       className: 'money', type: 'text', value: group(item.amount), placeholder: '0',
       inputMode: 'numeric', maxLength: 15, ariaLabel: 'Amount',
+      autocomplete: 'off', enterKeyHint: 'next',
     });
     onMoneyInput(amount, (raw) => { item.amount = raw; save(); renderSummary(); });
     const del = el('button', {
@@ -914,6 +971,7 @@ $('addItem').onclick = () => {
   markNew('items', '.item');
   $('items').querySelector('.item:last-of-type input')?.focus();
 };
+typeAhead($('items'), $('addItem'));
 
 // --- scanning a receipt -----------------------------------------------------
 // Tesseract runs entirely in the page — the photo is never uploaded anywhere.
@@ -1300,8 +1358,29 @@ const iconButton = (className, glyphs, label, onclick) => {
 // What the tick and the cross mean, for anyone who cannot see them.
 const say = (words) => { $('say').textContent = words; };
 
+// Set from renderSummary and nowhere else: a keystroke in an amount field
+// deliberately does not redraw the rows around it, so this is the only pass
+// that runs on every one of them.
+const tally = (id, text) => {
+  const n = $(id);
+  if (n.textContent === text) return; // no landing for a figure that didn't move
+  n.textContent = text;
+  n.hidden = !text;
+  if (!text) return;
+  n.classList.remove('land');
+  void n.offsetWidth; // restart the animation rather than queue it
+  n.classList.add('land');
+};
+
 function renderSummary() {
   result = calcShares(bill);
+  // The items' own sum, not result.subtotal: that one is zero until somebody is
+  // at the table, and a scan fills the items in before anybody is. This is the
+  // figure being compared against the bottom of the struk.
+  const items = bill.items.reduce((a, it) => a + (Number(it.amount) || 0), 0);
+  const heads = bill.participants.length;
+  tally('headCount', heads ? `${heads} ${heads === 1 ? 'person' : 'people'}` : '');
+  tally('itemSum', items ? `Rp ${money(items)}` : '');
   const box = $('summary');
   box.textContent = '';
   if (!result.people.length) {
@@ -1444,7 +1523,7 @@ function renderPays() {
   box.textContent = '';
   bill.pay.forEach((acct, i) => {
     const field = (key, props) => {
-      const input = el('input', { type: 'text', value: acct[key] ?? '', ...props });
+      const input = el('input', { type: 'text', value: acct[key] ?? '', spellcheck: false, autocomplete: 'off', enterKeyHint: 'next', ...props });
       input.oninput = () => { acct[key] = input.value; save(); renderSummary(); };
       return input;
     };
@@ -1475,6 +1554,7 @@ $('addPay').onclick = () => {
   markNew('pays', '.item');
   $('pays').querySelector('.item:last-of-type input')?.focus();
 };
+typeAhead($('pays'), $('addPay'));
 
 // Which PDF, asked when one is actually wanted. Whatever was picked last time
 // leads, so the answer is usually the same tap in the same place.
