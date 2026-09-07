@@ -132,7 +132,7 @@
      them in tabular numerals. */
   .billrow > .nodrop { width: 36px; }
   .billnew {
-    display: block; width: 100%; text-align: left; padding: 11px;
+    display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; padding: 11px;
     background: none; border: 0; border-top: 1px solid var(--line); border-radius: 0;
     box-shadow: none; color: var(--accent); font-weight: 600;
   }
@@ -178,7 +178,10 @@
   @keyframes land { from { transform: translateY(-3px); color: var(--accent); } }
   label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
   input, button, select { font: inherit; color: inherit; }
-  input[type=text], input[type=number], input[type=date], input[type=tel], select {
+  /* Every input but the two that are not text boxes. Named by type, the list
+     missed type=password, and that field wore the browser's own grey border
+     for as long as it existed. */
+  input:not([type=checkbox]):not([type=file]), select {
     width: 100%; padding: 10px 11px; border: 1px solid var(--line); border-radius: 11px;
     background: var(--bg); min-width: 0;
     transition: border-color var(--tap) var(--ease), background-color var(--tap) var(--ease);
@@ -236,6 +239,11 @@
     background: var(--accent); color: var(--accent-ink); border-color: transparent;
     font-weight: 600; box-shadow: var(--shadow);
   }
+  /* A label with a picture in front of it. Only the buttons that opt in: the
+     PDF chooser stacks two lines of text and the panel rows lay themselves
+     out, and neither wants to be a centred row. */
+  button.ico { display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+  button.ico svg { flex: 0 0 auto; }
   button.icon { flex: 0 0 auto; padding: 10px 11px; color: var(--danger); }
   /* The send buttons. Icon only, and 44px at the smallest, because this is
      tapped standing up, one-handed, once for every person at the table. Solid
@@ -320,6 +328,32 @@
   }
   .chip:active { transform: scale(.93); }
   .chip[aria-pressed=true] { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
+  /* A secret gets a box of its own: the key in front of it, the eye that lets
+     you check what you pasted, and the cross that takes it back — all inside
+     one border, because they are one control and were three. */
+  .field {
+    display: flex; align-items: center; gap: 8px; padding: 0 5px 0 11px;
+    border: 1px solid var(--line); border-radius: 11px; background: var(--bg);
+    transition: border-color var(--tap) var(--ease);
+  }
+  .field:focus-within { border-color: var(--accent); }
+  .field > svg { flex: 0 0 auto; color: var(--muted); }
+  /* The class is what carries the weight: the shared input rule above uses two
+     :not()s and so outranks a plain `.field input`, and the box would still be
+     drawn inside the box. */
+  .field input.bare {
+    flex: 1 1 auto; min-width: 0; padding: 10px 0;
+    border: 0; border-radius: 0; background: none;
+  }
+  .field input.bare:focus { outline: none; }
+  .field input::-ms-reveal, .field input::-webkit-credentials-auto-fill-button { display: none; }
+  .field button {
+    flex: 0 0 auto; display: inline-flex; padding: 7px; border: 0; border-radius: 8px;
+    background: none; box-shadow: none; color: var(--muted);
+  }
+  .field button:hover, .field button:focus-visible { color: var(--ink); background: var(--chip); }
+  .field button[aria-pressed=true] { color: var(--accent); }
+  .field button:active { transform: none; }
   .hint { color: var(--muted); font-size: 13px; margin: 0; }
   .share { display: flex; justify-content: space-between; gap: 8px; padding: 9px 0; border-top: 1px dashed var(--line); }
   .share:first-of-type { border-top: 0; }
@@ -381,7 +415,7 @@
   <section>
     <h2>Participants<span class="tally" id="headCount" hidden></span></h2>
     <div id="people"></div>
-    <button id="addPerson">+ Add participant</button>
+    <button id="addPerson">Add participant</button>
     <p class="hint" style="margin-top:8px">Phone is optional — leave it blank and WhatsApp will ask you who to send to. Tick the box to mark who paid the whole bill up front. Each person then gets two buttons: the message on its own, or the message and the bill as a PDF.</p>
   </section>
 
@@ -390,8 +424,8 @@
     <div id="items"></div>
     <p class="hint" style="margin-top:10px">Tap a name to tag it, tap again for a second share of the same line, or drag sideways across several to tag them all at once.</p>
     <div class="row" style="margin-top:10px">
-      <button id="addItem">+ Add item</button>
-      <button id="scan">📷 Scan a receipt</button>
+      <button id="addItem">Add item</button>
+      <button id="scan">Scan a receipt</button>
     </div>
     <!-- Native dialog: modal behaviour, a backdrop and Esc to dismiss, without
          a line of JavaScript to manage any of it. -->
@@ -424,17 +458,18 @@
          without re-reading the items you already have. -->
     <div class="row" id="photoRow" style="margin-top:10px">
       <p class="hint" id="photoNote" style="flex:1 1 auto"></p>
-      <button id="photoDrop" style="flex:0 0 auto"></button>
+      <button id="photoDrop" style="flex:0 0 auto"><span></span></button>
     </div>
     <input id="photoPick" type="file" accept="image/*" hidden>
     <!-- Optional, and the only thing on this page that ever leaves the device.
          Kept out of the bill so "Start over" and the exports can't carry it. -->
     <div style="margin-top:10px">
       <label for="geminiKey">Gemini API key (optional)</label>
-      <div class="row">
-        <input id="geminiKey" type="password" autocomplete="off" spellcheck="false"
-               style="flex:1 1 auto" placeholder="Leave blank to read on this device">
-        <button id="geminiClear" style="flex:0 0 auto">Clear</button>
+      <div class="field" id="geminiField">
+        <input id="geminiKey" class="bare" type="password" autocomplete="off" spellcheck="false"
+               placeholder="Leave blank to read on this device">
+        <button id="geminiPeek" type="button" aria-pressed="false"></button>
+        <button id="geminiClear" type="button" hidden></button>
       </div>
       <p class="hint" style="margin-top:6px">Kept on this device only, never in the bill or any export. With a key the photo goes to Google to be read, and comes back near-perfect; without one it is read on your phone and nothing leaves it.</p>
     </div>
@@ -484,7 +519,7 @@
   <section>
     <h2>Transfer to</h2>
     <div id="pays"></div>
-    <div class="row" style="margin-top:10px"><button id="addPay">+ Add another account</button></div>
+    <div class="row" style="margin-top:10px"><button id="addPay">Add another account</button></div>
     <p class="hint" style="margin-top:6px">Optional, and as many as you like — a bank account, an e-wallet, a QRIS name. All of them go into every WhatsApp message and the PDF, so people can pick whichever they have.</p>
   </section>
 
@@ -508,7 +543,7 @@
 
   <section class="quiet">
     <h2>Bills</h2>
-    <div class="row"><button id="billNew">+ New bill</button></div>
+    <div class="row"><button id="billNew">New bill</button></div>
     <div class="row" style="margin-top:8px">
       <button id="billOpen">Open a file…</button>
       <button id="billSave">Save as file</button>
@@ -752,7 +787,7 @@ function renderPicker() {
       row.append(el('span', { className: 'nodrop', ariaHidden: 'true' }));
     } else {
       row.append(el('button', {
-        className: 'icon', textContent: '\u2715', title: `Delete ${named(b)}`,
+        className: 'icon', innerHTML: CROSS, title: `Delete ${named(b)}`, ariaLabel: `Delete ${named(b)}`,
         onclick: () => {
           if (!confirm(`Delete "${named(b)}"? This cannot be undone.`)) return;
           shelf = shelf.filter((x) => x.id !== b.id);
@@ -765,7 +800,7 @@ function renderPicker() {
     menu.append(row);
   }
   menu.append(el('button', {
-    className: 'billnew', textContent: '+ New bill',
+    className: 'billnew', innerHTML: FILE_PLUS + '<span>New bill</span>',
     onclick: () => { showMenu(false); newBill(); },
   }));
 }
@@ -969,7 +1004,7 @@ function renderPeople() {
       onchange: () => { bill.paidBy = paid.checked ? name : ''; save(); renderAll(); },
     });
     const del = el('button', {
-      className: 'icon', title: `Remove ${name}`, textContent: '✕',
+      className: 'icon', title: `Remove ${name}`, ariaLabel: `Remove ${name}`, innerHTML: CROSS,
       onclick: async () => {
         await swipeOut(del.closest('.person'));
         bill.participants.splice(i, 1);
@@ -1014,7 +1049,7 @@ function renderItems() {
     });
     onMoneyInput(amount, (raw) => { item.amount = raw; save(); renderSummary(); });
     const del = el('button', {
-      className: 'icon', title: 'Remove item', textContent: '✕',
+      className: 'icon', title: 'Remove item', ariaLabel: 'Remove item', innerHTML: CROSS,
       onclick: async () => {
         await swipeOut(del.closest('.item'));
         bill.items.splice(i, 1); save(); renderAll();
@@ -1255,9 +1290,17 @@ $('geminiKey').value = geminiKey();
 $('geminiKey').oninput = () => {
   const v = $('geminiKey').value.trim();
   if (v) localStorage.setItem(KEY_SLOT, v); else localStorage.removeItem(KEY_SLOT);
+  showKeyClear();
   idle(); // the privacy line flips the moment the field does
 };
-$('geminiClear').onclick = () => { $('geminiKey').value = ''; localStorage.removeItem(KEY_SLOT); idle(); };
+$('geminiClear').onclick = () => {
+  $('geminiKey').value = '';
+  localStorage.removeItem(KEY_SLOT);
+  showKeyClear();
+  setPeek(false); // a box with nothing in it has nothing to show
+  idle();
+  $('geminiKey').focus();
+};
 idle();
 
 // Flash Lite reads a struk as well as the bigger models here and answers in two
@@ -1504,6 +1547,56 @@ const CLIP = svg(`<path ${LINE} d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9
 const COPY = svg(`<g ${LINE}><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></g>`);
 const TICK = svg(`<path ${LINE} d="M20 6L9 17l-5-5"/>`);
 const CROSS = svg(`<path ${LINE} d="M18 6L6 18M6 6l12 12"/>`);
+// The rest of the set, drawn to the same 24-unit box and the same two-unit
+// stroke as the four above, so a page full of them reads as one hand. The
+// camera replaces an emoji that was whatever font the phone happened to have.
+const PLUS = svg(`<path ${LINE} d="M12 5v14M5 12h14"/>`);
+const PERSON_ADD = svg(`<g ${LINE}><path d="M15 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><path d="M20 8v6M23 11h-6"/></g>`);
+const CAMERA = svg(`<g ${LINE}><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></g>`);
+const IMAGE = svg(`<g ${LINE}><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></g>`);
+const WALLET = svg(`<g ${LINE}><path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4z"/></g>`);
+const DOC = svg(`<g ${LINE}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></g>`);
+const TABLE = svg(`<g ${LINE}><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18"/></g>`);
+const FILE_PLUS = svg(`<g ${LINE}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M12 18v-5M9.5 15.5h5"/></g>`);
+const FOLDER = svg(`<path ${LINE} d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>`);
+const DOWNLOAD = svg(`<g ${LINE}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5M12 15V3"/></g>`);
+const APIKEY = svg(`<g ${LINE}><circle cx="7.5" cy="15.5" r="4.5"/><path d="M10.7 12.3L21 2M17.5 5.5l3 3M14.5 8.5l3 3"/></g>`);
+const EYE = svg(`<g ${LINE}><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></g>`);
+const EYE_OFF = svg(`<g ${LINE}><path d="M17.9 17.9A10.1 10.1 0 0 1 12 20c-7 0-10-8-10-8a18.5 18.5 0 0 1 5.1-5.9M9.9 4.2A9.1 9.1 0 0 1 12 4c7 0 10 8 10 8a18.5 18.5 0 0 1-2.2 3.2m-6.7-1.1a3 3 0 1 1-4.2-4.2"/><path d="M2 2l20 20"/></g>`);
+
+// The words stay the accessible name; the mark is aria-hidden and only leads
+// the eye to the right button in a column of them.
+const leadIcon = (id, glyph) => {
+  $(id).classList.add('ico');
+  $(id).insertAdjacentHTML('afterbegin', glyph);
+};
+for (const [id, glyph] of [
+  ['addPerson', PERSON_ADD], ['addItem', PLUS], ['scan', CAMERA],
+  ['addPay', WALLET], ['pdf', DOC], ['csv', TABLE],
+  ['billNew', FILE_PLUS], ['billOpen', FOLDER], ['billSave', DOWNLOAD],
+]) leadIcon(id, glyph);
+
+// The key field's own three marks. The eye is the one thing a password box
+// always needed and never had: a key is pasted, and a key you cannot read is
+// a key you cannot check.
+$('geminiField').insertAdjacentHTML('afterbegin', APIKEY);
+const peek = $('geminiPeek');
+const setPeek = (shown) => {
+  $('geminiKey').type = shown ? 'text' : 'password';
+  peek.innerHTML = shown ? EYE_OFF : EYE;
+  peek.setAttribute('aria-pressed', String(shown));
+  const words = shown ? 'Hide the key' : 'Show the key';
+  peek.title = words;
+  peek.setAttribute('aria-label', words);
+};
+setPeek(false);
+peek.onclick = () => setPeek($('geminiKey').type === 'password');
+$('geminiClear').innerHTML = CROSS;
+$('geminiClear').title = 'Remove the key from this device';
+$('geminiClear').setAttribute('aria-label', 'Remove the key from this device');
+// Nothing to take back until there is something in the box.
+const showKeyClear = () => { $('geminiClear').hidden = !$('geminiKey').value; };
+showKeyClear();
 
 // A button carrying a picture has to say what it is out loud. The label is the
 // accessible name and the desktop tooltip both; the glyph is for the eye only.
@@ -1641,7 +1734,9 @@ function renderPhoto() {
   $('photoNote').textContent = bill.photo
     ? `Struk photo attached, ${kb} KB — it goes at the foot of the PDF.`
     : 'No struk photo — the PDF will be just the numbers.';
-  $('photoDrop').textContent = bill.photo ? 'Remove photo' : 'Add photo';
+  $('photoDrop').classList.add('ico');
+  $('photoDrop').innerHTML = (bill.photo ? CROSS : IMAGE) +
+    `<span>${bill.photo ? 'Remove photo' : 'Add photo'}</span>`;
 }
 
 $('photoDrop').onclick = () => {
@@ -1685,7 +1780,7 @@ function renderPays() {
       return input;
     };
     const del = el('button', {
-      className: 'icon', title: 'Remove this account', textContent: '✕',
+      className: 'icon', title: 'Remove this account', ariaLabel: 'Remove this account', innerHTML: CROSS,
       onclick: async () => {
         await swipeOut(del.closest('.item'));
         bill.pay.splice(i, 1); save(); renderPays(); renderSummary();
