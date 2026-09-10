@@ -27,6 +27,9 @@ const GEMINI_ASK = [
   'tax is the government tax ("PPN", "PB1", "Pajak", "Tax");',
   'discount is any amount taken off ("Diskon", "Discount", "Potongan", "Voucher"), as a positive number;',
   'total is the final figure at the foot of the struk.',
+  'place is the name of the restaurant, cafe or shop printed at the head of the struk — the trading name alone, not its address, branch code, tagline or tax number.',
+  'date is the date on the struk as YYYY-MM-DD.',
+  'Indonesian receipts write dates day first, so 03/04/2026 and 03-04-26 are both 2026-04-03, never 3 March.',
   'Leave a field out when the struk does not print it. Never invent or calculate one.',
 ].join(' ');
 const AMOUNT = { type: 'integer' };
@@ -43,6 +46,8 @@ const GEMINI_CONFIG = {
       service: AMOUNT,
       tax: AMOUNT,
       discount: AMOUNT,
+      place: { type: 'string' },
+      date: { type: 'string' },
     },
     required: ['items'],
   },

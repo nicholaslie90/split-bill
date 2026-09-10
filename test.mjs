@@ -614,8 +614,36 @@ assert.deepEqual(roundToSum([1142.5, 1142.5], 2285), [1143, 1142]);
 
   // Anything that isn't the expected shape yields nothing, never a throw.
   for (const bad of [null, undefined, {}, { items: null }, { items: 'nope' }, { items: [null, 7, 'x'] }]) {
-    assert.deepEqual(parseGemini(bad), { items: [], total: null, service: null, tax: null, discount: null }, `must survive ${JSON.stringify(bad)}`);
+    assert.deepEqual(parseGemini(bad), { items: [], total: null, service: null, tax: null, discount: null, place: null, date: null }, `must survive ${JSON.stringify(bad)}`);
   }
+  // Where and when. Both go straight into fields the user sees, so both are
+  // treated the way an item name is: shape first, then whether it is real.
+  {
+    const g = (extra) => parseGemini({ items: [], ...extra });
+    assert.equal(g({ place: '  Warung   Sederhana \n' }).place, 'Warung Sederhana');
+    assert.equal(g({ place: 'Sate\u0000Khas' }).place, 'Sate Khas');
+    assert.equal(g({ place: 'x'.repeat(500) }).place.length, 80);
+    for (const empty of [undefined, null, '', '   ', 7, {}]) {
+      assert.equal(g({ place: empty }).place, null, `place ${JSON.stringify(empty)} is nothing`);
+    }
+
+    assert.equal(g({ date: '2026-04-03' }).date, '2026-04-03');
+    // <input type="date"> takes one shape and shows nothing for the rest, so
+    // anything else is dropped rather than passed through to a blank box.
+    for (const bad of ['03/04/2026', '3 April 2026', '2026-4-3', '26-04-03', '', null, 7, {}]) {
+      assert.equal(g({ date: bad }).date, null, `date ${JSON.stringify(bad)} is not a date`);
+    }
+    // new Date rolls a day that does not exist forward instead of refusing it.
+    assert.equal(g({ date: '2026-02-30' }).date, null);
+    assert.equal(g({ date: '2026-13-01' }).date, null);
+    // Leap day: real in 2024, not in 2026.
+    assert.equal(g({ date: '2024-02-29' }).date, '2024-02-29');
+    assert.equal(g({ date: '2026-02-29' }).date, null);
+    // A misread that lands centuries away is a misread.
+    assert.equal(g({ date: '0026-01-01' }).date, null);
+    assert.equal(g({ date: '2200-01-01' }).date, null);
+  }
+
   // A reply longer than any real struk is truncated rather than pasted in whole.
   assert.equal(parseGemini({ items: Array(900).fill({ qty: 1, name: 'Teh', amount: 5000 }) }).items.length, 200);
 

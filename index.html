@@ -452,14 +452,6 @@
 <main>
   <p class="lede">Tag who shared each item, then send everyone their share on WhatsApp.</p>
 
-  <section class="quiet">
-    <div class="grid2">
-      <div><label for="title">What / where</label><input id="title" type="text" placeholder="Dinner at Sate Khas" maxlength="80" spellcheck="false" autocomplete="off"></div>
-      <div><label for="date">Date</label>
-        <div class="datefield"><input id="date" type="date"><span id="dateText" aria-hidden="true"></span></div>
-      </div>
-    </div>
-  </section>
 
   <section>
     <h2>Items<span class="tally" id="itemSum" hidden></span></h2>
@@ -521,7 +513,20 @@
       <div class="row" style="margin-top:10px"><button id="strukClose">Close</button></div>
     </dialog>
   </section>
+   <!-- After the items, because the scan fills both of these in: asking for
+       them first made somebody type what they were about to be handed. Still
+       here, and still editable, for the struk that prints neither. -->
   <section>
+    <h2>Where &amp; when</h2>
+    <div class="grid2">
+      <div><label for="title">What / where</label><input id="title" type="text" placeholder="Dinner at Sate Khas" maxlength="80" spellcheck="false" autocomplete="off"></div>
+      <div><label for="date">Date</label>
+        <div class="datefield"><input id="date" type="date"><span id="dateText" aria-hidden="true"></span></div>
+      </div>
+    </div>
+  </section>
+
+ <section>
     <h2>Participants<span class="tally" id="headCount" hidden></span></h2>
     <div id="people"></div>
     <div class="row" style="margin-top:10px">
@@ -1542,7 +1547,21 @@ async function scanFile(file) {
       bill.billTotal = String(total);
       charged.push(`a total of Rp ${money(total)}, with service and tax worked back from it`);
     }
-    if (charged.length) paintFields();
+    // Where you were and when. The struk knows both, and making somebody type
+    // them before scanning was asking for the one thing the scan was about to
+    // hand over. A title you typed yourself is left alone — that is a choice,
+    // and yours. The date is not: it starts at today because a bill has to
+    // start somewhere, so the day printed on the paper wins over it.
+    const filled = [];
+    if (read.place && !bill.title.trim()) {
+      bill.title = read.place;
+      filled.push(`the place as ${read.place}`);
+    }
+    if (read.date && read.date !== bill.date) {
+      bill.date = read.date;
+      filled.push(`the date as ${fmtDate(read.date)}`);
+    }
+    if (charged.length || filled.length) paintFields();
     // Not `kept && save()`: that would skip the save on a bill whose photo had
     // already been dropped, and the items just read with it.
     const keptAgain = save();
@@ -1559,6 +1578,7 @@ async function scanFile(file) {
         ? `${cloud ? 'Gemini AI' : 'Tesseract, on your device,'} added ${items.length} item${items.length > 1 ? 's' : ''}, Rp ${money(sum)} in total.`
         : `Nothing came back from ${reader} — no item lines it could make out, so add them by hand.`,
       charged.length ? `It also read ${list(charged)}.` : '',
+      filled.length ? `It set ${list(filled)} from the struk.` : '',
       // Said only when it was not used, so it is a cross-check rather than a
       // repeat of the line above.
       // Added up here rather than through calcShares, which is zero until

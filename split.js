@@ -282,6 +282,28 @@ export function parseReceipt(text) {
 // scan doesn't care which of the two read the photo.
 const MAX_ITEMS = 200;      // a struk this long is a catering invoice
 const MAX_NAME = 120;
+const MAX_PLACE = 80;       // the What / where box stops at 80 too
+
+// A date off a struk goes straight into <input type="date">, which accepts one
+// shape and silently shows nothing for anything else. So: the shape, and then
+// whether it is a day that exists — new Date rolls 2026-02-30 forward to March
+// rather than refusing it, and round-tripping is what catches that. The year
+// bound is there because a misread "01-01-26" can come back as year 0026.
+const asDate = (v) => {
+  const s = String(v ?? '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+  const d = new Date(`${s}T00:00:00Z`);
+  if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== s) return null;
+  const year = Number(s.slice(0, 4));
+  return year >= 2000 && year <= 2100 ? s : null;
+};
+
+// Same defusing as an item name: control characters would come straight back
+// out in a WhatsApp message, and the box itself stops at 80 characters. Only a
+// real string — String(7) is "7" and String({}) is "[object Object]", and
+// either would sail into the What / where box looking like a place name.
+const asPlace = (v) => (typeof v !== 'string' ? null
+  : v.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, MAX_PLACE) || null);
 
 // The floor is a noise filter, not a rule about money: a dish under a thousand
 // rupiah does not exist, so a number that small in the item column is OCR
@@ -317,6 +339,10 @@ export function parseGemini(data) {
     service: charge(data?.service),
     tax: charge(data?.tax),
     discount: charge(data?.discount),
+    // Where you were and when: the two things on a struk that are not money,
+    // and the two the app used to make you type before it would do anything.
+    place: asPlace(data?.place),
+    date: asDate(data?.date),
   };
 }
 
