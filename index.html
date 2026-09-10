@@ -386,9 +386,8 @@
     overscroll-behavior: contain;
   }
   #struk .shot img { display: block; width: 100%; height: auto; }
-  /* The wait. Tesseract counts its own progress and the bar shows the real
-     figure; the post to Gemini is one request with no progress events on it at
-     all, so rather than invent a number the band sweeps to say "working". */
+  /* The wait. The post to Gemini is one request with no progress events on it
+     at all, so rather than invent a number the band sweeps to say "working". */
   .prog { margin-top: 10px; height: 4px; border-radius: 999px; background: var(--chip); overflow: hidden; }
   .prog > i {
     display: block; height: 100%; width: 0; border-radius: 999px; background: var(--accent);
@@ -641,7 +640,7 @@
 // The ?v= is not decoration: this page and split.js are cached separately, so a
 // browser holding yesterday's split.js while loading today's page would fail to
 // import and leave every button dead. Bump it whenever split.js gains an export.
-import { calcShares, collect, digits, fmtDate, group, money, parseGemini, parseReceipt, setMoneySeparator, shareLabel, sharedByLabel, statedTotal, toCsv, waLink } from './split.js?v=9';
+import { calcShares, collect, digits, fmtDate, group, money, parseGemini, setMoneySeparator, shareLabel, sharedByLabel, statedTotal, toCsv, waLink } from './split.js?v=9';
 
 const KEY = 'split-bill';
 const $ = (id) => document.getElementById(id);
@@ -1226,64 +1225,21 @@ $('addItem').onclick = () => {
 typeAhead($('items'), $('addItem'));
 
 // --- scanning a receipt -----------------------------------------------------
-// Tesseract runs entirely in the page — the photo is never uploaded anywhere.
-// The library is ~60 KB but pulls its wasm engine and the language data (~8 MB)
-// on first use, so none of it loads until you actually scan, and the browser
-// caches it for next time. Indonesian *and* English: the headings on a struk are
-// Indonesian, the dishes on it usually aren't ("WAGYU CARBONARA FETTUCCINE").
-const OCR_SRC = 'https://cdn.jsdelivr.net/npm/tesseract.js@6.0.1/dist/tesseract.min.js';
-const OCR_SRI = 'sha384-r1ru3tcf6FhnCFR4B7pIFG+BhFF9LlFtz/P1y4pblWn3AGs9y3lBx5SKLNf4+rED';
-let ocr; // the pending or resolved Tesseract namespace
-const loadOcr = () => (ocr ??= new Promise((ok, fail) => {
-  document.head.append(el('script', {
-    src: OCR_SRC, integrity: OCR_SRI, crossOrigin: 'anonymous', referrerPolicy: 'no-referrer',
-    onload: () => ok(window.Tesseract),
-    // Drop the failed attempt so pressing scan again retries instead of hanging.
-    onerror: () => { ocr = null; fail(new Error('Could not load the scanner — check your connection.')); },
-  }));
-}));
-
 const note = (text) => { $('scanNote').textContent = text; };
-// A fraction when there is a real one to show, null for "working, and nobody
-// knows how far" — decoding the photo, fetching eight megabytes of scanner, or
-// waiting on a single POST to Gemini that reports nothing until it answers.
-// Never a made-up number: a bar that fills to 90% and sits there is a lie the
-// user has to wait out anyway.
-const showProg = (at) => {
+// On or off, and nothing in between. The reader on the device used to count its
+// own progress and the bar showed the real figure; the post to Gemini is one
+// request that reports nothing until it answers, so a sweeping band says
+// "working" and no number is invented. A bar that fills to 90% and sits there
+// is a lie the user has to wait out anyway.
+const showProg = (on) => {
   const p = $('scanProg');
-  p.hidden = at === false;
-  p.classList.toggle('busy', at == null);
-  if (at == null || at === false) {
-    p.removeAttribute('aria-valuenow');
-    p.firstElementChild.style.width = '';
-  } else {
-    p.setAttribute('aria-valuenow', String(Math.round(at * 100)));
-    p.firstElementChild.style.width = `${Math.round(at * 100)}%`;
-  }
-};
-const progress = (m) => {
-  if (m.status !== 'recognizing text') return;
-  showProg(m.progress);
-  note(`Reading the receipt… ${Math.round(m.progress * 100)}%`);
+  p.hidden = !on;
+  p.classList.toggle('busy', !!on); // `busy` is what draws the sweeping band
 };
 
-// One worker, kept alive, so scanning a second struk doesn't reload the engine.
-let worker;
-const getWorker = () => (worker ??= loadOcr().then(async (T) => {
-  const w = await T.createWorker('ind+eng', T.OEM.LSTM_ONLY, { logger: progress });
-  // One column, which is what a struk is. This is the setting that decides
-  // whether a price stays with its dish: the default hunts for a page layout in
-  // the tiled floor behind the paper, and treating the whole photo as one rigid
-  // block of text (mode 6) reads a curled struk a row out of step, so every
-  // dish comes back holding the next dish's price — right names, wrong money.
-  await w.setParameters({ tessedit_pageseg_mode: T.PSM.SINGLE_COLUMN });
-  return w;
-}).catch((e) => { worker = null; throw e; })); // let the next scan retry
-
-// One size for all three jobs. 1600px is enough to read the smallest print on a
+// One size for both jobs. 1600px is enough to read the smallest print on a
 // struk, small enough to sit in localStorage beside the bill, and small enough
-// to post to Gemini — a raw 12 MP photo is none of those things: put that
-// straight into Tesseract and it produced no item lines at all.
+// to post to Gemini — a raw 12 MP photo is neither of those things.
 const SHOT_WIDTH = 1600;
 
 // Two ways to decode a photo, because one of them is not enough. Android hands
@@ -1322,32 +1278,12 @@ async function prepare(file) {
   return c;
 }
 
-// Grey, then an S-curve through the midpoint. This is what lifts thermal ink
-// off paper a hand is shadowing; a plain linear contrast bump clips the faint
-// strokes away and measured worse. Onto a copy — Gemini and the PDF both want
-// the photograph, and only Tesseract wants it flattened like this.
-const sCurve = (x) => { const f = (t) => 1 / (1 + Math.exp(8 * (0.5 - t))); return (f(x) - f(0)) / (f(1) - f(0)); };
-const INK = Uint8Array.from({ length: 256 }, (_, i) => Math.round(255 * sCurve(i / 255)));
-
-function flatten(shot) {
-  const c = el('canvas', { width: shot.width, height: shot.height });
-  const ctx = c.getContext('2d', { willReadFrequently: true });
-  ctx.filter = 'grayscale(1)';
-  ctx.drawImage(shot, 0, 0);
-  ctx.filter = 'none';
-  const px = ctx.getImageData(0, 0, c.width, c.height);
-  for (let i = 0; i < px.data.length; i += 4) px.data[i] = px.data[i + 1] = px.data[i + 2] = INK[px.data[i]];
-  ctx.putImageData(px, 0, 0);
-  return c;
-}
-
 // --- reading the struk with Gemini instead -----------------------------------
-// A model reads a creased struk far better than Tesseract can: on the test
-// receipt Tesseract gets eight of the ten lines and quietly mangles two, Gemini
-// gets all ten and the quantities with them. It costs a round trip and, more to
-// the point, the photo leaves the phone. Tesseract is still here, but as the
-// fallback for when that round trip fails rather than as a second reader you
-// choose between.
+// A model reads a creased struk far better than an OCR engine on the phone can:
+// on the test receipt Tesseract got eight of the ten lines and quietly mangled
+// two, Gemini gets all ten and the quantities with them. It costs a round trip
+// and, more to the point, the photo leaves the phone. There is no second reader
+// any more — see the note at the scan itself for why.
 //
 // There is no key in this page and no box to put one in. A key served from a
 // public repo is a key published to the world, so it lives as a secret on a
@@ -1368,7 +1304,7 @@ const KEEP = () => [
   'Scanning is best effort, so check every name and amount afterwards.',
   'Service, tax and discount come off the struk as well, so check those too.',
   'The photo is read by Google’s Gemini AI, so it leaves your device; nothing else about the bill does.',
-  'If that cannot be reached, Tesseract reads it on your device instead and nothing is sent.',
+  'If it cannot be read, nothing is guessed at — the photo stays on the bill and the lines are yours to type.',
 ].join(' ');
 // "a, b and c" — a comma before the last of three reads as a fourth.
 const list = (xs) => (xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)}`);
@@ -1385,7 +1321,7 @@ const SCAN_URL = 'https://split-bill-scan.nicholaslie90.workers.dev';
 
 async function readWithGemini(shot) {
   note('Sending the photo to Gemini AI to be read…');
-  showProg(null);
+  showProg(true);
   const res = await fetch(SCAN_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -1479,26 +1415,13 @@ $('shot').onchange = () => {
   if (file) scanFile(file);
 };
 
-// Tesseract, on this device: the reader that catches a scan when Gemini cannot
-// be reached, and the one case where the photo never leaves at all.
-async function readHere(shot) {
-  note('Reading it here instead — loading Tesseract, a one-time download of about 8 MB…');
-  showProg(null);
-  const w = await getWorker();
-  // ponytail: one pass, one page-segmentation mode. A curled struk can still
-  // hand a row's price to the dish above it; reading the word boxes and
-  // re-pairing the two columns by position would fix that, if it proves common.
-  const { data } = await w.recognize(flatten(shot));
-  return parseReceipt(data.text);
-}
-
 async function scanFile(file) {
   $('scan').disabled = true;
   // Say so the moment the photo arrives. Decoding a 12 MP picture takes long
   // enough on a phone to look like nothing happened at all, and the reader's
   // own first word comes only after it.
   note('Reading the photo…');
-  showProg(null);
+  showProg(true);
   try {
     const shot = await prepare(file);
     // The paper goes on the bill before the reading is attempted, not after.
@@ -1510,17 +1433,13 @@ async function scanFile(file) {
     bill.photo = shot.toDataURL('image/jpeg', 0.8);
     let kept = save();
     renderPhoto(); // and say so now, rather than after a fifteen-second read
-    // Gemini first, always; the reader on the device is the net under it. A
-    // dead connection, a rate limit or a Worker having a bad morning costs you
-    // the better reading, never the scan — Tesseract still gets most of the
-    // lines, and `fell` carries the reason so the note can say what happened
-    // rather than leaving a worse reading unexplained.
-    let fell = '';
-    const read = await readWithGemini(shot).catch((e) => {
-      fell = e.message;
-      return readHere(shot);
-    });
-    const cloud = !fell;
+    // One reader, and no net under it on purpose. There used to be a second
+    // that ran here on the device, and it came back with eight of ten lines and
+    // two quietly mangled — which reads exactly like a scan that worked. On a
+    // bill people actually pay, a wrong number nobody thinks to question is
+    // worse than no number at all, so a failed read now fails, says so, and
+    // leaves the photo attached to type from.
+    const read = await readWithGemini(shot);
     const { items, total } = read;
     // Append, never replace: a bad scan must not wipe out what's already typed.
     bill.items.push(...items.map((it) => ({ name: it.name, amount: String(it.amount), sharedBy: [] })));
@@ -1568,14 +1487,10 @@ async function scanFile(file) {
     kept = kept && keptAgain;
     renderAll();
     const sum = items.reduce((a, it) => a + it.amount, 0);
-    // Which of the two read it, every time. Without this line a scan that fell
-    // back to the local reader — no signal, a rate limit, the Worker having a
-    // bad morning — looks exactly like Gemini doing a bad job.
-    const reader = cloud ? 'Gemini AI' : 'Tesseract on your device';
+    const reader = 'Gemini AI';
     note([
-      fell ? `${fell} Nothing was sent.` : '',
       items.length
-        ? `${cloud ? 'Gemini AI' : 'Tesseract, on your device,'} added ${items.length} item${items.length > 1 ? 's' : ''}, Rp ${money(sum)} in total.`
+        ? `Gemini AI added ${items.length} item${items.length > 1 ? 's' : ''}, Rp ${money(sum)} in total.`
         : `Nothing came back from ${reader} — no item lines it could make out, so add them by hand.`,
       charged.length ? `It also read ${list(charged)}.` : '',
       filled.length ? `It set ${list(filled)} from the struk.` : '',

@@ -177,109 +177,12 @@ export function collect(result, payer) {
   return { owed, due: owed.reduce((a, p) => a + p.total, 0) };
 }
 
-// --- receipt photo -> draft item lines --------------------------------------
-// Best effort, and that is the whole contract: a struk photo is creased, faded
-// and thermal-printed, so this is deliberately conservative. It takes the
-// rightmost money-looking number on a line as that line's amount and the text
-// before it as the name, and it skips the lines that aren't items — totals, tax,
-// service, cash, change — which the app charges through its own fields, so a
-// misread there can't quietly double-charge anybody. Whatever it gets wrong the
-// user edits; whatever it misses they type.
-// The summary block at the foot of the struk. Narrower than NOT_AN_ITEM on
-// purpose: "Meja 7" is not an item either, but it's printed in the header and
-// must not stop the reading before it starts.
-const END_OF_ITEMS = /(sub\s*)?total|servi|charg|ppn|pb\s*[1li|]|pajak|tax|diskon|discount|voucher|pembulatan|rounding|tunai|cash|kembali|change|\d+\s*(items|barang|qty)\b/i;
-const NOT_AN_ITEM = /(sub\s*)?total|tunai|cash|kembali|change|ppn|pb\s*1|pajak|tax|servi|diskon|discount|voucher|pembulatan|rounding|bayar|payment|kartu|card|debit|kredit|credit|qris|npwp|terima\s*kasih|thank|kasir|cashier|struk|\bnota\b|receipt|invoice|meja|table|tanggal|date|\d{1,2}\s*[/-]\s*\d{1,2}\s*[/-]|jam|time|\bpax\b|\d+\s*(items|barang|qty)\b|catatan|www\.|@/i;
-// 59.000 | 59,000 | 1.234.567 | 59000 — with an optional two-decimal tail. The
-// space around the separator is OCR's, not the printer's: "165 .000" is one
-// number that a crease broke in half, and dropping it loses a whole item line.
-const MONEY = String.raw`\d{1,3}(?:\s?[.,]\s?\d{3})+(?:[.,]\d{2})?|\d{3,}(?:[.,]\d{2})?`;
-const MONEY_ON_LINE = new RegExp(MONEY, 'g');
-// A price sitting at the end of what's left of the name is the unit-price column
-// ("2 x Es Teh  5.000  10.000"), not part of what the thing is called.
-const UNIT_PRICE = new RegExp(`(?:${MONEY})\\s*$`);
-
-// "59.000,00" -> 59000. The two-decimal tail only goes if what's left still
-// looks like an amount, so a bare "590" stays 590 rather than becoming 5.
-const asRupiah = (s) => {
-  const trimmed = s.replace(/[.,]\d{2}$/, '');
-  return Number((trimmed.replace(/\D/g, '').length >= 3 ? trimmed : s).replace(/\D/g, ''));
-};
-
-// What's left of a line once the money is off it: the quantity kept only when
-// it is more than one — "2x Es Teh" explains the amount, a lone "1" says
-// nothing — and the punctuation OCR sprays down both edges taken off.
-const LETTERS = (s) => (s.match(/[a-z]/gi) ?? []).length;
-const dishName = (s) => s
-  .replace(UNIT_PRICE, '')
-  .replace(/^rp\.?\s*/i, '') // "Rp 79.000" on a line of its own is a price, not a dish called Rp
-  .replace(/^(\d+)\s*[xX*]?\s+/, (_, q) => (Number(q) > 1 ? `${q}x ` : ''))
-  .replace(/^[\s.,:;*|-]+/, '')
-  .replace(/[\s.,:;xX*@=|-]+$/, '')
-  .trim();
-
-export function parseReceipt(text) {
-  const items = [];
-  let total = null;
-  let done = false; // past the last dish, into the charges
-  // A printed struk puts the price beside the dish; a delivery app's order
-  // screen puts it underneath, sometimes with a note in between. So the lines
-  // with no money on them are held, and a price that arrives without a name of
-  // its own takes the first one of those that reads like a dish. Five deep: a
-  // wrapped name and a note, no more, so a price can never reach back up into
-  // the shop's address at the top of the page.
-  let pending = [];
-  for (const raw of String(text ?? '').split('\n')) {
-    const line = raw.trim();
-    // Every struk prints its dishes first and its charges after, so the first
-    // charge line ends the list. Matching each charge by name isn't enough on
-    // its own — OCR turns "Service Charge" into "vice Charg®" and "Subtotal"
-    // into "Shiota! Pal", and a charge that slips through as an item inflates
-    // what everybody owes. One dish has to have been found first, so header
-    // noise that happens to read as "total" can't swallow the whole receipt.
-    done ||= items.length > 0 && END_OF_ITEMS.test(line);
-    const found = line.match(MONEY_ON_LINE);
-    if (!found) {
-      if (line) pending = [...pending, line].slice(-5);
-      continue;
-    }
-    const amount = asRupiah(found[found.length - 1]); // unit price then line total: the line total wins
-    // Nothing on a struk costs less than a thousand rupiah, and nothing costs a
-    // hundred million: below is a table number or the tail of a misread line,
-    // above is the shop's phone number read as one long figure.
-    // Not money after all — a size ("400 ml"), a table number, a phone number
-    // read as one long figure. Still text, so it can still name the price that
-    // comes after it.
-    if (amount < 1000 || amount > 100_000_000) {
-      pending = [...pending, line].slice(-5);
-      continue;
-    }
-    if (done || NOT_AN_ITEM.test(line)) {
-      // The printed total is worth keeping as a cross-check, even though it's
-      // not an item. Receipts print SUBTOTAL, then TOTAL, then what was paid.
-      if (/\btotals?\b/i.test(line) && !/sub\s*total/i.test(line)) total = amount;
-      pending = [];
-      continue;
-    }
-    let name = dishName(line.slice(0, line.lastIndexOf(found[found.length - 1])));
-    // A price on a line of its own belongs to the block above it. Never to a
-    // charge line: "Subtotal" over its own figure is not a dish.
-    if (LETTERS(name) < 2) {
-      name = pending.map(dishName)
-        .find((n) => LETTERS(n) >= 2 && !NOT_AN_ITEM.test(n) && !END_OF_ITEMS.test(n)) ?? '';
-    }
-    pending = [];
-    if (LETTERS(name) < 2) continue; // no name = not an item line
-    items.push({ name, amount });
-  }
-  return { items, total };
-}
-
 // --- receipt photo -> Gemini -> draft item lines ------------------------------
-// A model reads a creased struk far better than Tesseract does, but its answer
-// is untrusted input like any other: it decides what everybody pays, so nothing
-// goes through unchecked. Same shape out as parseReceipt, so the rest of the
-// scan doesn't care which of the two read the photo.
+// The only reader there is. Its answer is untrusted input like any other: it
+// decides what everybody pays, so nothing goes through unchecked. There used to
+// be a second reader on the device for when this one could not be reached, and
+// it is gone — a struk it misread came back looking exactly like a struk it had
+// read, and a wrong number nobody questions is worse than no number at all.
 const MAX_ITEMS = 200;      // a struk this long is a catering invoice
 const MAX_NAME = 120;
 const MAX_PLACE = 80;       // the What / where box stops at 80 too
@@ -322,9 +225,9 @@ export function parseGemini(data) {
     // Control characters would come straight back out in a WhatsApp message.
     const name = String(raw?.name ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, MAX_NAME);
     if (!name) continue;
-    // Quantity leads the name the same way it does on the struk, and the same
-    // way parseReceipt writes it — a lone "1" says nothing, "4x" explains the
-    // amount and tells you how many shares the line is worth splitting into.
+    // Quantity leads the name the same way it does on the struk — a lone "1"
+    // says nothing, "4x" explains the amount and tells you how many shares the
+    // line is worth splitting into.
     const qty = Math.round(Number(raw?.qty));
     items.push({ name: Number.isFinite(qty) && qty > 1 && qty <= 999 ? `${qty}x ${name}` : name, amount });
   }

@@ -45,38 +45,29 @@ node test.mjs                 # prints "ok"
 
 ## Scanning a receipt — best effort
 
-The scan is a **starting point, not an answer**. A struk is thermal-printed, creased and often photographed at an angle, so check the numbers either way. Gemini reads it by default; the reader on your device is the fallback for when that cannot be reached.
+The scan is a **starting point, not an answer**. A struk is thermal-printed, creased and often photographed at an angle, so check the numbers afterwards. There is one reader, and if it cannot read the struk it says so rather than handing back a guess.
 
 - Opens the camera in the page (`getUserMedia`, back camera where there is one) with a live preview, and grabs a single frame when you press **Take photo**. The stream is stopped the moment the sheet closes. No camera, no permission, or an insecure origin → it falls back to picking a photo, which reads exactly the same way.
-- Whichever reader runs, the photo is greyed and cut to 1600px first. A raw 12 MP photo reads as noise.
+- The photo is cut to 1600px first — enough to read the smallest print, small enough to store beside the bill and to post. A raw 12 MP photo is none of those.
 - Scanned items are **added** to whatever is already there, never replacing it, and are ordinary editable rows.
 - The photo is kept with the bill and goes at the **foot of the PDF**, so a number can be checked against the paper it came from. Scanning is what attaches it — there is no separate button for that — and under the scan button a row always says whether one is there, with **Remove photo** beside it when it is. Scanning again replaces it, and emptying the bill clears it. It is the only large thing in storage, so if it ever won't fit the bill is saved without it and the scan note says so.
 
-### By default: Gemini, through a Worker
+### The reader: Gemini, through a Worker
 
 The photo goes to `gemini-3.5-flash-lite` and comes back as schema-constrained JSON. On the test struk it reads **all ten lines exactly**, quantities included, in about 3 seconds — including the service charge, tax and discount, so one read leaves nothing to type but who ate what.
 
 - **The photo leaves your device on every scan.** That is the trade, and the note under the button says so. Nothing else about the bill is ever sent.
 - The key is **not in this page**. It lives as a secret on a small Cloudflare Worker (`worker/`), which takes an image and returns Google's reply. A key embedded in the page — however it got there, GitHub secret or otherwise — is served to every visitor in plain text and scraped within days; a Worker secret is never sent to a browser at all.
 - The Worker is a receipt reader, not a general Gemini relay: it owns the prompt and the schema, accepts an image and nothing else, caps the image at 4 MB, checks the `Origin`, and rate-limits to 20 scans a minute per address.
-- If the Worker cannot be reached — no signal, rate limit, a bad morning — the scan falls back to the reader on your device and the note says why.
+- If the Worker cannot be reached — no signal, rate limit, a bad morning — the scan fails and says why. **Nothing is guessed at.** There used to be an OCR engine on the device as a fallback; it returned eight of the test struk's ten lines and quietly mangled two, which reads exactly like a scan that worked. On a bill people actually pay, a wrong number nobody thinks to question is worse than no number, so it is gone. The photo stays attached and the lines are yours to type.
 - **There is nothing to set up and no box to fill in.** A reader you have to configure is a reader most people never turn on, so the good reading is the default one and the only one. Never commit a key to this repo either way: it is public and GitHub Pages serves the source verbatim, so a key in the source is a key published to the world — and Google scans public repos and disables what it finds.
 - **It reads the place and the date too**, so scanning first fills in the whole head of the bill and not just its lines. A title you typed yourself is left alone — that is your choice; the date is replaced, because it only ever started at today. Indonesian receipts write dates day first, so `03/04/2026` is read as 3 April.
 - The reply is schema-constrained JSON and is validated before anything becomes an item: amounts must be whole rupiah between 1.000 and 100 juta, names are stripped of control characters and capped, and the list is truncated. A date has to be `YYYY-MM-DD` and a day that actually exists — `new Date` rolls 30 February forward into March rather than refusing it, so it has to round-trip — and fall inside 2000–2100. A place has to be a real string, since `String(7)` is `"7"`. A model's answer decides what people pay, so it is treated as untrusted input.
-
-### The fallback: on your phone
-
-[Tesseract.js](https://github.com/naptha/tesseract.js) with Indonesian and English data, in single-column mode. **Nothing is uploaded.** On the test struk it reads eight of the ten lines and mangles two, in about 16 seconds.
-
-- Takes the rightmost amount on a line as that line's total (so a unit-price column is ignored) and the text before it as the name, keeping a quantity when it's more than one.
-- Handles the other layout too — a delivery app's order screen, where the price sits on its own line *under* the dish with the customer's note in between. Lines with no money on them are held, five deep, and a price that arrives without a name of its own takes the first held line that reads like a dish and is not a charge.
-- **Stops at the charges** — subtotal, service, PPN, discount, rounding, cash, change. Those belong to the app's own fields, so a misread can never quietly double-charge anybody. It shows the printed total when it finds one, purely as a cross-check.
-- First scan downloads the engine and language data (~8 MB) and the browser caches it. Nothing loads until you press the button.
 
 ## Notes
 
 - Amounts are whole rupiah. Phone numbers without a country code are assumed Indonesian (`08…` → `+62…`); type `+<code>…` for anywhere else.
 - Tax is charged on subtotal + service charge by default (Indonesian convention) — there's a checkbox to turn that off.
-- [jsPDF](https://github.com/parallax/jsPDF) and [Tesseract.js](https://github.com/naptha/tesseract.js) are loaded from a CDN at pinned versions with SRI hashes — Tesseract only when you first press scan. Tesseract then fetches its own wasm engine and language data, which SRI can't cover. So PDF export and scanning need a connection; everything else works offline.
+- [jsPDF](https://github.com/parallax/jsPDF) is loaded from a CDN at a pinned version with an SRI hash. So PDF export and scanning need a connection; everything else works offline.
 - The only thing that ever leaves the device is a receipt photo, when you scan one. The bill itself — names, amounts, phone numbers — never goes anywhere.
 - The CSV starts with `sep=,` so Excel honours the comma whatever the machine's locale says, and a name beginning with `=`, `+`, `-` or `@` is prefixed with `'` so a spreadsheet can't run it as a formula.
