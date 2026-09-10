@@ -26,6 +26,12 @@
   }, { once: true });
 </script>
 <style>
+  /* The UA's rule for [hidden] is a plain `display: none`, so any author rule
+     that sets display — `button.ico { display: inline-flex }` below, and it is
+     not the only one — silently outranks it and the element stays on screen.
+     Every `hidden` in this file depends on this line; without it the trap is
+     re-sprung by the next selector that happens to set display. */
+  [hidden] { display: none !important; }
   /* One palette, both schemes: light-dark() picks per the used color-scheme,
      so the toggle only has to change color-scheme — and native controls
      (inputs, scrollbars, the date picker) follow along for free. */
@@ -272,9 +278,6 @@
     min-width: 24px; min-height: 24px; margin-right: 3px;
     display: inline-flex; vertical-align: -5px;
   }
-  /* inline-flex outranks the UA's [hidden] rule, so say it here or an unsent
-     row wears a tick anyway. */
-  button.tick[hidden] { display: none; }
   button.wa.send {
     background: var(--wa-fill); border-color: transparent; color: #fff;
     box-shadow: var(--shadow);
