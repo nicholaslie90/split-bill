@@ -1,0 +1,12 @@
+name = "split-bill-scan"
+main = "index.js"
+compatibility_date = "2025-09-01"
+
+# The key is never in this file. It is set once, out of band:
+#   wrangler secret put GEMINI_KEY
+[[ratelimits]]
+name = "SCAN_LIMIT"
+namespace_id = "1001"
+# 20 scans a minute from one address — a table of eight rescanning a creased
+# struk never reaches it, and a script pointed at the endpoint does immediately.
+simple = { limit = 20, period = 60 }

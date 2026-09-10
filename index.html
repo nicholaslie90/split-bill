@@ -1366,27 +1366,32 @@ function flatten(shot) {
 // A model reads a creased struk far better than Tesseract can: on the test
 // receipt Tesseract gets eight of the ten lines and quietly mangles two, Gemini
 // gets all ten and the quantities with them. It costs a round trip and, more to
-// the point, the photo leaves the phone — so it is off unless you supply a key.
+// the point, the photo leaves the phone — which it now does by default, through
+// a Worker that holds the key so the page does not have to. A key in a page
+// served from a public repo is a key published to the world; a key in a Worker
+// secret is a key nobody but Cloudflare ever sees. Tesseract is still here, but
+// as the fallback for when that round trip fails rather than as the default.
 //
-// The key lives in its own storage slot, never in `bill`: otherwise "Start
-// over" would wipe it, and every CSV, PDF and WhatsApp message would carry it.
+// The box is still the override: a key in it goes straight to Google on your
+// own quota, never through the Worker. It lives in its own storage slot, never
+// in `bill` — otherwise "Start over" would wipe it, and every CSV, PDF and
+// WhatsApp message would carry it.
 const KEY_SLOT = 'split-bill-gemini-key';
 // The box wins over the slot. A password manager can fill a field without ever
 // firing `input`, and a key you can see in front of you that the scan then
 // ignores is the worst kind of silence — the reading just quietly goes local.
 const geminiKey = () => ($('geminiKey')?.value || localStorage.getItem(KEY_SLOT) || '').trim();
 
-// The standing caveat is not standing any more — with a key the photo leaves
-// the device, and saying otherwise on the one screen where it matters would be
-// a lie. Built fresh each time rather than snapshotted at load.
+// The standing caveat says the photo leaves the device, because it does — on
+// every scan now, not only the ones with a key in the box. Saying otherwise on
+// the one screen where it matters would be a lie. Built fresh each time rather
+// than snapshotted at load, because the box can change under it.
 const KEEP = () => [
   'Scanning is best effort, so check every name and amount afterwards.',
+  'Service, tax and discount come off the struk as well, so check those too.',
   geminiKey()
-    ? 'Service, tax and discount come off the struk as well, so check those too.'
-    : 'Service, tax and discount you still enter yourself.',
-  geminiKey()
-    ? 'The photo is sent to Google Gemini to be read; nothing else about the bill is.'
-    : 'Nothing is uploaded: the photo and the reading both stay in your browser.',
+    ? 'The photo goes straight to Google Gemini on your own key; nothing else about the bill does.'
+    : 'The photo goes to Google Gemini to be read, by way of this site’s reader; nothing else about the bill does.',
 ].join(' ');
 // "a, b and c" — a comma before the last of three reads as a fourth.
 const list = (xs) => (xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)}`);
@@ -1413,6 +1418,11 @@ idle();
 // seconds rather than fifteen. responseSchema is what keeps the reply to the
 // shape parseGemini expects, instead of prose with some JSON inside it.
 const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent';
+// The door for everyone who has not brought a key: a Cloudflare Worker holding
+// one, which takes an image and returns Google's reply untouched. Its source is
+// in worker/ — the prompt and schema below are duplicated there on purpose, so
+// change the pair together or two readings of one struk will disagree.
+const SCAN_URL = 'https://split-bill-scan.nicholaslie90.workers.dev';
 const GEMINI_ASK = [
   'Read this Indonesian restaurant receipt (struk).',
   'Return every ordered line item exactly as printed, with its quantity and its line total in whole rupiah.',
@@ -1446,24 +1456,38 @@ const GEMINI_CONFIG = {
 };
 
 async function readWithGemini(shot) {
+  const key = geminiKey();
   note('Sending the photo to Gemini…');
   showProg(null);
-  const res = await fetch(GEMINI_URL, {
-    method: 'POST',
-    // A header, never a query string — a key in a URL ends up in logs and history.
-    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': geminiKey() },
-    body: JSON.stringify({
-      generationConfig: GEMINI_CONFIG,
-      contents: [{ parts: [
-        { text: GEMINI_ASK },
-        { inline_data: { mime_type: 'image/jpeg', data: shot.toDataURL('image/jpeg', 0.85).split(',')[1] } },
-      ] }],
-    }),
-  });
+  const data = shot.toDataURL('image/jpeg', 0.85).split(',')[1];
+  // Same model, same prompt, different door. With a key we go to Google direct
+  // and the Worker never sees the photo; without one the Worker sends it on and
+  // the page only ever posts the picture, never a credential.
+  const res = key
+    ? await fetch(GEMINI_URL, {
+      method: 'POST',
+      // A header, never a query string — a key in a URL ends up in logs and history.
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+      body: JSON.stringify({
+        generationConfig: GEMINI_CONFIG,
+        contents: [{ parts: [
+          { text: GEMINI_ASK },
+          { inline_data: { mime_type: 'image/jpeg', data } },
+        ] }],
+      }),
+    })
+    : await fetch(SCAN_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image: data }),
+    });
   if (!res.ok) {
-    // Google's reason is worth showing; the key is never echoed back in it.
+    // Google's reason is worth showing; the key is never echoed back in it. The
+    // Worker's reason is its own, already stripped of anything about the key.
     const why = await res.json().catch(() => null);
-    throw new Error(`Gemini refused (${res.status}). ${why?.error?.message ?? 'Check the key.'}`);
+    throw new Error(key
+      ? `Gemini refused (${res.status}). ${why?.error?.message ?? 'Check the key.'}`
+      : why?.error ?? `The reader could not be reached (${res.status}).`);
   }
   const body = await res.json();
   const text = body?.candidates?.[0]?.content?.parts?.map((x) => x.text).filter(Boolean).join('') ?? '';
@@ -1573,7 +1597,17 @@ async function scanFile(file) {
     bill.photo = shot.toDataURL('image/jpeg', 0.8);
     let kept = save();
     renderPhoto(); // and say so now, rather than after a fifteen-second read
-    const read = await (geminiKey() ? readWithGemini(shot) : readHere(shot));
+    // Gemini first, always; the reader on the device is the net under it. A
+    // dead connection, a rate limit or a Worker having a bad morning costs you
+    // the better reading, never the scan — Tesseract still gets most of the
+    // lines, and `fell` carries the reason so the note can say what happened
+    // rather than leaving a worse reading unexplained.
+    let fell = '';
+    const read = await readWithGemini(shot).catch((e) => {
+      fell = e.message;
+      return readHere(shot);
+    });
+    const cloud = !fell;
     const { items, total } = read;
     // Append, never replace: a bad scan must not wipe out what's already typed.
     bill.items.push(...items.map((it) => ({ name: it.name, amount: String(it.amount), sharedBy: [] })));
@@ -1610,10 +1644,10 @@ async function scanFile(file) {
     // Which of the two read it, every time. Without this line a scan that fell
     // back to the local reader — a key that never saved, a field a password
     // manager filled silently — looks exactly like Gemini doing a bad job.
-    const reader = geminiKey() ? 'Gemini' : 'the reader on your device';
+    const reader = cloud ? 'Gemini' : 'the reader on your device';
     note([
       items.length
-        ? `${geminiKey() ? 'Gemini' : 'Your device'} added ${items.length} item${items.length > 1 ? 's' : ''}, Rp ${money(sum)} in total.`
+        ? `${cloud ? 'Gemini' : 'Your device'} added ${items.length} item${items.length > 1 ? 's' : ''}, Rp ${money(sum)} in total.`
         : `Nothing came back from ${reader} — no item lines it could make out, so add them by hand.`,
       charged.length ? `It also read ${list(charged)}.` : '',
       // Said only when it was not used, so it is a cross-check rather than a
@@ -1629,6 +1663,7 @@ async function scanFile(file) {
               : `The struk says Rp ${money(total)}, but the lines and charges read come to Rp ${money(adds)} — something on the paper was missed.`;
           })()
         : '',
+      fell ? `${fell} Your device read it instead, so the charges are yours to enter.` : '',
       kept ? 'The photo goes at the foot of the PDF.' : 'The photo was too big to keep, so the PDF goes without it.',
       KEEP(),
     ].filter(Boolean).join(' '));
