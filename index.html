@@ -1374,7 +1374,11 @@ async function readWithGemini(shot) {
     headers: { 'Content-Type': 'application/json' },
     // A picture and nothing else: there is no credential in this page to send.
     body: JSON.stringify({ image: shot.toDataURL('image/jpeg', 0.85).split(',')[1] }),
-  });
+    // No response at all — offline, DNS, a blocked request — rejects with a
+    // bare TypeError that never reaches the sentence below. "Failed to fetch"
+    // is not a thing to tell somebody splitting a dinner bill, and without a
+    // full stop it runs into whatever the note says next.
+  }).catch(() => { throw new Error('Gemini AI could not be reached.'); });
   if (!res.ok) {
     // The Worker's reason is already stripped of anything about the key, so it
     // can be shown as it comes.
@@ -1538,6 +1542,7 @@ async function scanFile(file) {
     // bad morning — looks exactly like Gemini doing a bad job.
     const reader = cloud ? 'Gemini AI' : 'Tesseract on your device';
     note([
+      fell ? `${fell} Nothing was sent.` : '',
       items.length
         ? `${cloud ? 'Gemini AI' : 'Tesseract, on your device,'} added ${items.length} item${items.length > 1 ? 's' : ''}, Rp ${money(sum)} in total.`
         : `Nothing came back from ${reader} — no item lines it could make out, so add them by hand.`,
@@ -1555,7 +1560,6 @@ async function scanFile(file) {
               : `The struk says Rp ${money(total)}, but the lines and charges read come to Rp ${money(adds)} — something on the paper was missed.`;
           })()
         : '',
-      fell ? `${fell} Tesseract read it here on your device instead — nothing was sent — so the charges are yours to enter.` : '',
       kept ? 'The photo goes at the foot of the PDF.' : 'The photo was too big to keep, so the PDF goes without it.',
       KEEP(),
     ].filter(Boolean).join(' '));
