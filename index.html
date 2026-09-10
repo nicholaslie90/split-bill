@@ -475,7 +475,11 @@
          until the PDF is opened, and a row that appears only when there is one
          can't tell you that there isn't. Scanning attaches one; so does this,
          without re-reading the items you already have. -->
-    <div class="row" id="photoRow" style="margin-top:10px">
+    <!-- Centred, against `.row`'s usual bottom alignment: that is meant for a
+         line of buttons, and here it pinned the sentence to the floor of a row
+         whose height is the button beside it — all the air above the text and
+         none below, so it sat on the first item field. -->
+    <div class="row" id="photoRow" style="margin:10px 0 14px; align-items:center">
       <button id="photoZoom" type="button" hidden><img id="photoThumb" alt=""></button>
       <p class="hint" id="photoNote" style="flex:1 1 auto"></p>
       <button id="photoDrop" style="flex:0 0 auto"><span></span></button>
