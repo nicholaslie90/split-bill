@@ -460,19 +460,31 @@
   </section>
 
   <section>
-    <h2>Participants<span class="tally" id="headCount" hidden></span></h2>
-    <div id="people"></div>
-    <button id="addPerson">Add participant</button>
-    <p class="hint" style="margin-top:8px">Phone is optional — leave it blank and WhatsApp will ask you who to send to. Tick the box to mark who paid the whole bill up front. Each person then gets two buttons: the message on its own, or the message and the bill as a PDF.</p>
-  </section>
-
-  <section>
     <h2>Items<span class="tally" id="itemSum" hidden></span></h2>
+    <!-- First, because it is the first thing to do: one photo fills in the
+         lines and the charges, and everything below is then a correction
+         rather than an evening of typing. What the scan is doing and what it
+         attached follow it directly — feedback belongs beside the control that
+         caused it, not at the foot of the card. -->
+    <div class="row" style="margin-top:4px">
+      <button id="scan" class="primary">Scan a receipt</button>
+    </div>
+    <div class="prog" id="scanProg" role="progressbar" aria-label="Reading the receipt" hidden><i></i></div>
+    <p class="hint" id="scanNote" style="margin-top:8px" aria-live="polite"></p>
+    <!-- Always here, whether or not a photo is attached: the struk is invisible
+         until the PDF is opened, and a row that appears only when there is one
+         can't tell you that there isn't. Scanning attaches one; so does this,
+         without re-reading the items you already have. -->
+    <div class="row" id="photoRow" style="margin-top:10px">
+      <button id="photoZoom" type="button" hidden><img id="photoThumb" alt=""></button>
+      <p class="hint" id="photoNote" style="flex:1 1 auto"></p>
+      <button id="photoDrop" style="flex:0 0 auto"><span></span></button>
+    </div>
+    <input id="photoPick" type="file" accept="image/*" hidden>
     <div id="items"></div>
     <p class="hint" style="margin-top:10px">Tap a name to tag it, tap again for a second share of the same line, or drag sideways across several to tag them all at once.</p>
     <div class="row" style="margin-top:10px">
       <button id="addItem">Add item</button>
-      <button id="scan">Scan a receipt</button>
     </div>
     <!-- Native dialog: modal behaviour, a backdrop and Esc to dismiss, without
          a line of JavaScript to manage any of it. -->
@@ -498,18 +510,6 @@
         <button id="camClose">Cancel</button>
       </div>
     </dialog>
-    <div class="prog" id="scanProg" role="progressbar" aria-label="Reading the receipt" hidden><i></i></div>
-    <p class="hint" id="scanNote" style="margin-top:8px" aria-live="polite"></p>
-    <!-- Always here, whether or not a photo is attached: the struk is invisible
-         until the PDF is opened, and a row that appears only when there is one
-         can't tell you that there isn't. Scanning attaches one; so does this,
-         without re-reading the items you already have. -->
-    <div class="row" id="photoRow" style="margin-top:10px">
-      <button id="photoZoom" type="button" hidden><img id="photoThumb" alt=""></button>
-      <p class="hint" id="photoNote" style="flex:1 1 auto"></p>
-      <button id="photoDrop" style="flex:0 0 auto"><span></span></button>
-    </div>
-    <input id="photoPick" type="file" accept="image/*" hidden>
     <!-- The struk, big enough to read. Another native dialog: backdrop, Esc and
          focus handling, none of it written here. -->
     <dialog id="struk" aria-label="The struk photo">
@@ -517,6 +517,13 @@
       <div class="row" style="margin-top:10px"><button id="strukClose">Close</button></div>
     </dialog>
   </section>
+  <section>
+    <h2>Participants<span class="tally" id="headCount" hidden></span></h2>
+    <div id="people"></div>
+    <button id="addPerson">Add participant</button>
+    <p class="hint" style="margin-top:8px">Phone is optional — leave it blank and WhatsApp will ask you who to send to. Tick the box to mark who paid the whole bill up front. Each person then gets two buttons: the message on its own, or the message and the bill as a PDF.</p>
+  </section>
+
 
   <section>
     <h2>Service, tax &amp; discount</h2>
