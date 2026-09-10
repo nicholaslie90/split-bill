@@ -1343,12 +1343,15 @@ function flatten(shot) {
 // someone's phone for no reason at all — take it out on the way past.
 try { localStorage.removeItem('split-bill-gemini-key'); } catch { /* private mode */ }
 
-// The standing caveat says the photo leaves the device, because it always does.
-// Saying otherwise on the one screen where it matters would be a lie.
+// The standing caveat says the photo leaves the device, because it always does
+// — and says what reads it when it gets there. "Sent away to be read" is true
+// and tells you nothing: which machine reads a photo of your dinner, and where
+// it runs, is the part worth knowing before you press the button.
 const KEEP = () => [
   'Scanning is best effort, so check every name and amount afterwards.',
   'Service, tax and discount come off the struk as well, so check those too.',
-  'The photo is sent away to be read; nothing else about the bill is.',
+  'The photo is read by Google’s Gemini AI, so it leaves your device; nothing else about the bill does.',
+  'If that cannot be reached, Tesseract reads it on your device instead and nothing is sent.',
 ].join(' ');
 // "a, b and c" — a comma before the last of three reads as a fourth.
 const list = (xs) => (xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)}`);
@@ -1364,7 +1367,7 @@ idle();
 const SCAN_URL = 'https://split-bill-scan.nicholaslie90.workers.dev';
 
 async function readWithGemini(shot) {
-  note('Sending the photo to be read…');
+  note('Sending the photo to Gemini AI to be read…');
   showProg(null);
   const res = await fetch(SCAN_URL, {
     method: 'POST',
@@ -1455,10 +1458,10 @@ $('shot').onchange = () => {
   if (file) scanFile(file);
 };
 
-// Tesseract, on this device. Still the whole story when there's no key, and
-// still what the app falls back to if a scan is refused.
+// Tesseract, on this device: the reader that catches a scan when Gemini cannot
+// be reached, and the one case where the photo never leaves at all.
 async function readHere(shot) {
-  note('Loading the scanner — a one-time download of about 8 MB…');
+  note('Reading it here instead — loading Tesseract, a one-time download of about 8 MB…');
   showProg(null);
   const w = await getWorker();
   // ponytail: one pass, one page-segmentation mode. A curled struk can still
@@ -1533,10 +1536,10 @@ async function scanFile(file) {
     // Which of the two read it, every time. Without this line a scan that fell
     // back to the local reader — no signal, a rate limit, the Worker having a
     // bad morning — looks exactly like Gemini doing a bad job.
-    const reader = cloud ? 'Gemini' : 'the reader on your device';
+    const reader = cloud ? 'Gemini AI' : 'Tesseract on your device';
     note([
       items.length
-        ? `${cloud ? 'Gemini' : 'Your device'} added ${items.length} item${items.length > 1 ? 's' : ''}, Rp ${money(sum)} in total.`
+        ? `${cloud ? 'Gemini AI' : 'Tesseract, on your device,'} added ${items.length} item${items.length > 1 ? 's' : ''}, Rp ${money(sum)} in total.`
         : `Nothing came back from ${reader} — no item lines it could make out, so add them by hand.`,
       charged.length ? `It also read ${list(charged)}.` : '',
       // Said only when it was not used, so it is a cross-check rather than a
@@ -1552,7 +1555,7 @@ async function scanFile(file) {
               : `The struk says Rp ${money(total)}, but the lines and charges read come to Rp ${money(adds)} — something on the paper was missed.`;
           })()
         : '',
-      fell ? `${fell} Your device read it instead, so the charges are yours to enter.` : '',
+      fell ? `${fell} Tesseract read it here on your device instead — nothing was sent — so the charges are yours to enter.` : '',
       kept ? 'The photo goes at the foot of the PDF.' : 'The photo was too big to keep, so the PDF goes without it.',
       KEEP(),
     ].filter(Boolean).join(' '));
