@@ -1,8 +1,8 @@
 // Bill math. Everything is whole rupiah — no cents in IDR.
 // The page reaches the translations through here, so there is one copy of the
 // language in play: the ?v= must match on both sides or there would be two.
-import { getLang, t } from './i18n.js?v=2';
-export { getLang, setLang, swap, t, translateTree, watch } from './i18n.js?v=2';
+import { getLang, t } from './i18n.js?v=3';
+export { getLang, setLang, swap, t, translateTree, watch } from './i18n.js?v=3';
 // The only rule that matters: the sum of what everybody pays must equal the bill total, exactly.
 
 // Round `values` to whole rupiah so that they still add up to `target`.

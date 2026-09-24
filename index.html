@@ -646,7 +646,7 @@
 // The ?v= is not decoration: this page and split.js are cached separately, so a
 // browser holding yesterday's split.js while loading today's page would fail to
 // import and leave every button dead. Bump it whenever split.js gains an export.
-import { calcShares, collect, digits, fmtDate, getLang, group, money, parseGemini, setLang, setMoneySeparator, shareLabel, sharedByLabel, statedTotal, t, toCsv, translateTree, waLink, waNumber, watch } from './split.js?v=13';
+import { calcShares, collect, digits, fmtDate, getLang, group, money, parseGemini, setLang, setMoneySeparator, shareLabel, sharedByLabel, statedTotal, t, toCsv, translateTree, waLink, waNumber, watch } from './split.js?v=14';
 
 const KEY = 'split-bill';
 const $ = (id) => document.getElementById(id);
@@ -1379,7 +1379,7 @@ try { localStorage.removeItem('split-bill-gemini-key'); } catch { /* private mod
 const KEEP = () => [
   'Scanning is best effort, so check every name and amount afterwards.',
   'Service, tax and discount come off the struk as well, so check those too.',
-  'The photo is read by Google’s Gemini AI, so it leaves your device; nothing else about the bill does.',
+  'The photo is read by Google’s Gemini AI, or by DeepSeek AI when Gemini is busy, so it leaves your device; nothing else about the bill does.',
   'If it cannot be read, nothing is guessed at — the photo stays on the bill and the lines are yours to type.',
 ].map((x) => t(x)).join(' ');
 // "a, b and c" — a comma before the last of three reads as a fourth.
@@ -1417,14 +1417,15 @@ async function readWithGemini(shot) {
     if (res.status === 429) {
       const mins = Math.max(1, Math.ceil((Number(why?.retryAfter) || 60) / 60));
       throw new Error(mins >= 90
-        ? t('Gemini AI has reached its usage limit for now. Try again in about {n} hours.', { n: Math.round(mins / 60) })
-        : t(mins === 1 ? 'Gemini AI has reached its usage limit for now. Try again in {n} minute.' : 'Gemini AI has reached its usage limit for now. Try again in {n} minutes.', { n: mins }));
+        ? t('The receipt reader has reached its usage limit for now. Try again in about {n} hours.', { n: Math.round(mins / 60) })
+        : t(mins === 1 ? 'The receipt reader has reached its usage limit for now. Try again in {n} minute.' : 'The receipt reader has reached its usage limit for now. Try again in {n} minutes.', { n: mins }));
     }
     throw new Error(why?.error ?? t('The reader could not be reached ({status}).', { status: res.status }));
   }
   const body = await res.json();
   const text = body?.candidates?.[0]?.content?.parts?.map((x) => x.text).filter(Boolean).join('') ?? '';
-  try { return parseGemini(JSON.parse(text)); }
+  // Which one read it: the Worker hands the struk to DeepSeek when Gemini is out of quota.
+  try { return { ...parseGemini(JSON.parse(text)), reader: body.reader === 'DeepSeek' ? 'DeepSeek AI' : 'Gemini AI' }; }
   catch {
     // Say what came back instead. "Not a receipt" on its own leaves nothing to
     // act on; the finish reason names the usual culprits — a filtered image, a
@@ -1575,10 +1576,10 @@ async function scanFile(file) {
     kept = kept && keptAgain;
     renderAll();
     const sum = items.reduce((a, it) => a + it.amount, 0);
-    const reader = 'Gemini AI';
+    const { reader } = read;
     note([
       items.length
-        ? t(items.length > 1 ? 'Gemini AI added {n} items, Rp {amt} in total.' : 'Gemini AI added {n} item, Rp {amt} in total.', { n: items.length, amt: money(sum) })
+        ? t(items.length > 1 ? '{reader} added {n} items, Rp {amt} in total.' : '{reader} added {n} item, Rp {amt} in total.', { reader, n: items.length, amt: money(sum) })
         : t('Nothing came back from {reader} — no item lines it could make out, so add them by hand.', { reader }),
       charged.length ? t('It also read {list}.', { list: list(charged) }) : '',
       filled.length ? t('It set {list} from the struk.', { list: list(filled) }) : '',

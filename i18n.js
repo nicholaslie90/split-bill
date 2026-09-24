@@ -111,17 +111,17 @@ const ID = {
   'unknown type': 'jenis tidak dikenal',
   'Scanning is best effort, so check every name and amount afterwards.': 'Hasil pindaian belum tentu sempurna, jadi periksa lagi setiap nama dan jumlahnya.',
   'Service, tax and discount come off the struk as well, so check those too.': 'Servis, pajak, dan diskon juga dibaca dari struk, jadi periksa juga.',
-  'The photo is read by Google’s Gemini AI, so it leaves your device; nothing else about the bill does.':
-    'Foto dibaca oleh Gemini AI dari Google, jadi fotonya dikirim keluar dari perangkatmu; data tagihan lainnya tidak.',
+  'The photo is read by Google’s Gemini AI, or by DeepSeek AI when Gemini is busy, so it leaves your device; nothing else about the bill does.':
+    'Foto dibaca oleh Gemini AI dari Google, atau DeepSeek AI saat Gemini sibuk, jadi fotonya dikirim keluar dari perangkatmu; data tagihan lainnya tidak.',
   'If it cannot be read, nothing is guessed at — the photo stays on the bill and the lines are yours to type.':
     'Kalau tidak terbaca, tidak ada yang ditebak — foto tetap di tagihan dan itemnya bisa kamu ketik sendiri.',
   'Photograph the struk with your camera, or pick a photo you already have.': 'Foto struknya dengan kamera, atau pilih foto yang sudah ada.',
   'Couldn\'t open the camera — pick a photo instead.': 'Kamera tidak bisa dibuka — pilih foto saja.',
   'Sending the photo to Gemini AI to be read…': 'Mengirim foto ke Gemini AI untuk dibaca…',
   'Gemini AI could not be reached.': 'Gemini AI tidak dapat dihubungi.',
-  'Gemini AI has reached its usage limit for now. Try again in {n} minute.': 'Gemini AI sedang mencapai batas pemakaian. Coba lagi dalam {n} menit.',
-  'Gemini AI has reached its usage limit for now. Try again in {n} minutes.': 'Gemini AI sedang mencapai batas pemakaian. Coba lagi dalam {n} menit.',
-  'Gemini AI has reached its usage limit for now. Try again in about {n} hours.': 'Gemini AI sedang mencapai batas pemakaian. Coba lagi sekitar {n} jam lagi.',
+  'The receipt reader has reached its usage limit for now. Try again in {n} minute.': 'Pembaca struk sedang mencapai batas pemakaian. Coba lagi dalam {n} menit.',
+  'The receipt reader has reached its usage limit for now. Try again in {n} minutes.': 'Pembaca struk sedang mencapai batas pemakaian. Coba lagi dalam {n} menit.',
+  'The receipt reader has reached its usage limit for now. Try again in about {n} hours.': 'Pembaca struk sedang mencapai batas pemakaian. Coba lagi sekitar {n} jam lagi.',
   'The reader could not be reached ({status}).': 'Pembaca struk tidak dapat dihubungi ({status}).',
   'Gemini sent back something that was not a receipt{why}.': 'Gemini mengirim balik sesuatu yang bukan struk{why}.',
   'It said: {text}': 'Katanya: {text}',
@@ -134,8 +134,8 @@ const ID = {
   'a total of Rp {amt}, with service and tax worked back from it': 'total Rp {amt}, dengan servis dan pajak dihitung mundur dari situ',
   'the place as {place}': 'tempatnya {place}',
   'the date as {date}': 'tanggalnya {date}',
-  'Gemini AI added {n} item, Rp {amt} in total.': 'Gemini AI menambahkan {n} item, total Rp {amt}.',
-  'Gemini AI added {n} items, Rp {amt} in total.': 'Gemini AI menambahkan {n} item, total Rp {amt}.',
+  '{reader} added {n} item, Rp {amt} in total.': '{reader} menambahkan {n} item, total Rp {amt}.',
+  '{reader} added {n} items, Rp {amt} in total.': '{reader} menambahkan {n} item, total Rp {amt}.',
   'Nothing came back from {reader} — no item lines it could make out, so add them by hand.':
     'Tidak ada hasil dari {reader} — tidak ada baris item yang terbaca, jadi tambahkan sendiri.',
   'It also read {list}.': 'Juga terbaca {list}.',

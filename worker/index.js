@@ -67,6 +67,34 @@ function retryDelay(text, header) {
   return secs == null ? null : Math.min(Math.max(Math.ceil(secs), 1), 86400);
 }
 
+// The stand-in for when Gemini is out of quota. Same reading, same words: it has
+// no response schema, only a JSON mode, so the shape is spelled out instead —
+// and the page checks the answer the same way whichever reader gave it.
+const DEEPSEEK_URL = 'https://api.deepseek.com/chat/completions';
+const DEEPSEEK_ASK = `${GEMINI_ASK} Reply with JSON only, in this shape: `
+  + '{"items":[{"qty":1,"name":"...","amount":0}],"total":0,"service":0,"tax":0,"discount":0,"place":"...","date":"YYYY-MM-DD"}.';
+
+// Dressed as a Gemini reply, so the page reads both through one door and only
+// learns which one answered from `reader`. Null when DeepSeek can't help either.
+async function readWithDeepSeek(image, key) {
+  const res = await fetch(DEEPSEEK_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+    body: JSON.stringify({
+      model: 'deepseek-flash',
+      temperature: 0,
+      response_format: { type: 'json_object' },
+      messages: [{ role: 'user', content: [
+        { type: 'text', text: DEEPSEEK_ASK },
+        { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${image}` } },
+      ] }],
+    }),
+  });
+  if (!res.ok) { console.error('DeepSeek', res.status, await res.text()); return null; }
+  const text = (await res.json())?.choices?.[0]?.message?.content ?? '';
+  return { candidates: [{ content: { parts: [{ text }] } }], reader: 'DeepSeek' };
+}
+
 const cors = (origin) => ({
   'Access-Control-Allow-Origin': origin,
   'Access-Control-Allow-Headers': 'Content-Type',
@@ -124,6 +152,13 @@ export default {
       const text = await res.text();
       // The owner's log is where the prose does belong: `wrangler tail`.
       console.error('Gemini', res.status, text);
+      // Out of quota: DeepSeek reads this one instead. Nothing is remembered —
+      // the next scan asks Gemini first again, so it is back the moment its
+      // quota is.
+      if (res.status === 429 && env.DEEPSEEK_KEY) {
+        const read = await readWithDeepSeek(image, env.DEEPSEEK_KEY).catch((e) => { console.error('DeepSeek', e); return null; });
+        if (read) return new Response(JSON.stringify(read), { headers: { ...head, 'Content-Type': 'application/json' } });
+      }
       // The one thing in a quota refusal the page may have: how long to wait,
       // as a bare number of seconds, so it can say when to try again.
       const retryAfter = res.status === 429 ? retryDelay(text, res.headers.get('Retry-After')) : null;
