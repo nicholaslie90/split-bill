@@ -490,6 +490,11 @@
          evening of typing. What the scan is doing and what it
          attached follow it directly — feedback belongs beside the control that
          caused it, not at the foot of the card. -->
+    <!-- Before the scan, because the scan reads amounts in it. -->
+    <div class="row" style="align-items:center; margin-bottom:10px">
+      <label for="cur" style="margin:0; flex:0 0 auto">Currency</label>
+      <select id="cur" style="flex:1 1 auto"></select>
+    </div>
     <div class="row" style="margin-top:4px">
       <button id="scan" class="primary">Scan a receipt</button>
     </div>
@@ -563,19 +568,19 @@
     <!-- The quickest true thing on a struk is the figure at the bottom. Type
          it and the charges fall out of the difference; leave it and the
          percentages do the work as before. -->
-    <div><label for="billTotal">Total on the struk (Rp)</label><input id="billTotal" class="money" type="text" inputmode="numeric" maxlength="15"></div>
+    <div><label for="billTotal">Total on the struk <span class="cur"></span></label><input id="billTotal" class="money" type="text" inputmode="numeric" maxlength="15"></div>
     <p class="hint" id="totalNote" style="margin:6px 0 12px" aria-live="polite"></p>
     <div class="grid2">
       <div><label for="svc">Service charge %</label><input id="svc" type="number" min="-100" max="100" step="0.1" inputmode="decimal"></div>
-      <div><label for="svcAmt">Service charge (Rp)</label><input id="svcAmt" class="money" type="text" inputmode="numeric" maxlength="15"></div>
+      <div><label for="svcAmt">Service charge <span class="cur"></span></label><input id="svcAmt" class="money" type="text" inputmode="numeric" maxlength="15"></div>
       <div><label for="tax">Tax / PPN %</label><input id="tax" type="number" min="-100" max="100" step="0.1" inputmode="decimal"></div>
-      <div><label for="taxAmt">Tax / PPN (Rp)</label><input id="taxAmt" class="money" type="text" inputmode="numeric" maxlength="15"></div>
+      <div><label for="taxAmt">Tax / PPN <span class="cur"></span></label><input id="taxAmt" class="money" type="text" inputmode="numeric" maxlength="15"></div>
     </div>
     <label style="margin-top:10px; display:flex; gap:8px; align-items:center">
       <input id="tos" type="checkbox" style="width:auto"> Charge tax on top of the service charge
     </label>
     <div class="grid2" style="margin-top:10px">
-      <div><label for="disc">Discount (Rp)</label><input id="disc" class="money" type="text" inputmode="numeric" maxlength="15"></div>
+      <div><label for="disc">Discount <span class="cur"></span></label><input id="disc" class="money" type="text" inputmode="numeric" maxlength="15"></div>
       <div><label for="discPct">Discount %</label><input id="discPct" type="number" min="0" max="100" step="0.1" inputmode="decimal"></div>
     </div>
     <p class="hint" style="margin-top:6px">Either one (or both) — the discount is split evenly per person, except that nobody's share goes below zero: what a small share can't absorb comes off the others instead.</p>
@@ -584,9 +589,6 @@
         <label for="roundTo">Round the total down to</label>
         <select id="roundTo">
           <option value="0">Don't round</option>
-          <option value="100">Nearest 100</option>
-          <option value="500">Nearest 500</option>
-          <option value="1000">Nearest 1.000</option>
         </select>
       </div>
       <div>
@@ -646,7 +648,7 @@
 // The ?v= is not decoration: this page and split.js are cached separately, so a
 // browser holding yesterday's split.js while loading today's page would fail to
 // import and leave every button dead. Bump it whenever split.js gains an export.
-import { calcShares, collect, digits, fmtDate, getLang, group, money, parseGemini, setLang, setMoneySeparator, shareLabel, sharedByLabel, statedTotal, t, toCsv, translateTree, waLink, waNumber, watch } from './split.js?v=14';
+import { CURRENCIES, calcShares, cash, collect, decimals, fmtDate, getCurrency, getLang, group, money, parseGemini, setLang, setCurrency, setMoneySeparator, shareLabel, sharedByLabel, statedTotal, t, toCsv, translateTree, typing, waLink, waNumber, watch } from './split.js?v=15';
 
 const KEY = 'split-bill';
 const $ = (id) => document.getElementById(id);
@@ -670,7 +672,7 @@ const blank = () => ({
   billTotal: '',
   servicePct: 5, serviceAmt: '', taxPct: 11, taxAmt: '', taxOnService: true,
   discount: '', discountPct: '', roundTo: 0,
-  pay: [], sent: [],
+  pay: [], sent: [], currency: 'IDR',
 });
 
 const FIELDS = [['title', 'title'], ['date', 'date'], ['billTotal', 'billTotal'],
@@ -679,9 +681,10 @@ const FIELDS = [['title', 'title'], ['date', 'date'], ['billTotal', 'billTotal']
                 ['disc', 'discount'], ['discPct', 'discountPct'], ['roundTo', 'roundTo'],
                 ];
 
-// Money fields hold whole-rupiah digit strings. A stored decimal has to be rounded
-// on the way in, or reading it as digits would turn 1142.51 into 114.251.
-const rupiah = (v) => (v === '' || v == null ? '' : String(Math.max(0, Math.round(Number(v) || 0))));
+// Money fields hold digit strings of the currency's smallest unit. A stored
+// decimal has to be rounded on the way in, or reading it as digits would turn
+// 1142.51 into 114.251.
+const units = (v) => (v === '' || v == null ? '' : String(Math.max(0, Math.round(Number(v) || 0))));
 const pct = (v) => (v === '' || v == null ? '' : String(Math.min(100, Math.max(0, Number(v) || 0))));
 
 // Every bill comes in through here — out of storage, off the shelf, or out of
@@ -695,12 +698,13 @@ function clean(raw) {
   b.date = /^\d{4}-\d{2}-\d{2}$/.test(b.date) ? b.date : '';
   b.participants = [...new Set((Array.isArray(b.participants) ? b.participants : []).map((n) => String(n).slice(0, 40)))];
   b.items = (Array.isArray(b.items) ? b.items : []).slice(0, 400).map((it) => ({
-    ...it, name: String(it?.name ?? '').slice(0, 120), amount: rupiah(it?.amount),
+    ...it, name: String(it?.name ?? '').slice(0, 120), amount: units(it?.amount),
     sharedBy: Array.isArray(it?.sharedBy) ? it.sharedBy.map(String) : [],
   }));
-  for (const k of ['serviceAmt', 'taxAmt', 'discount', 'billTotal']) b[k] = rupiah(b[k]);
+  for (const k of ['serviceAmt', 'taxAmt', 'discount', 'billTotal']) b[k] = units(b[k]);
   for (const k of ['servicePct', 'taxPct', 'discountPct']) b[k] = pct(b[k]);
   b.roundTo = Number(b.roundTo) || 0;
+  b.currency = Object.hasOwn(CURRENCIES, b.currency) ? b.currency : 'IDR';
   // Who has already had theirs. Kept to people who are still on the bill, so a
   // name that was removed or renamed elsewhere can't leave a mark behind.
   b.sent = (Array.isArray(b.sent) ? b.sent : []).map(String).filter((n) => b.participants.includes(n));
@@ -840,7 +844,7 @@ function renderPicker() {
           [fmtDate(b.date), heads ? t(heads === 1 ? '{n} person' : '{n} people', { n: heads }) : '', here ? t('open now') : '']
             .filter(Boolean).join(' \u00b7 ') }),
       ]),
-      el('span', { className: 'billsum', textContent: `Rp ${money(calcShares(b).total)}` }),
+      el('span', { className: 'billsum', textContent: cash(calcShares(b).total, { c: b.currency }) }),
     ]);
     const row = el('div', { className: here ? 'billrow here' : 'billrow' }, [open]);
     // The open bill has no cross: there is always one open, and Clear beside
@@ -911,10 +915,12 @@ setMoneySeparator(sep);
 // Regroup on every keystroke without dragging the caret to the end: count the
 // digits to its left, reformat, then land after that same digit again.
 function onMoneyInput(inp, set) {
+  inp.inputMode = decimals() ? 'decimal' : 'numeric'; // a decimal key only where there are cents
+  inp.onblur = () => { inp.value = group(typing(inp.value).raw); }; // "12." settles as 12.00
   inp.oninput = () => {
     const typed = inp.value.slice(0, inp.selectionStart ?? inp.value.length).replace(/\D/g, '').length;
-    const raw = digits(inp.value);
-    inp.value = group(raw);
+    const { raw, shown } = typing(inp.value);
+    inp.value = shown;
     let seen = 0, at = 0;
     while (at < inp.value.length && seen < typed) if (/\d/.test(inp.value[at++])) seen++;
     inp.setSelectionRange(at, at);
@@ -1016,6 +1022,8 @@ const markNew = (boxId, sel) => $(boxId).querySelector(`${sel}:last-of-type`)?.c
 // --- header + charges -------------------------------------------------------
 const MONEY = new Set(['svcAmt', 'taxAmt', 'disc', 'billTotal']);
 const paintFields = () => {
+  setCurrency(bill.currency);
+  paintCurrency();
   for (const [id, key] of FIELDS) $(id).value = MONEY.has(id) ? group(bill[key]) : bill[key];
   $('dateText').textContent = fmtDate(bill.date);
 };
@@ -1039,6 +1047,46 @@ $('sep').onchange = () => {
   paintFields(); // charge fields keep their raw values, just regrouped
   renderAll();
 };
+// The picker, the symbol beside each amount field, the decimal key and the
+// rounding steps all follow the bill's currency. Names come from the browser in
+// the page's language, so there is no list of them to keep here.
+function paintCurrency() {
+  const c = getCurrency();
+  let names;
+  try { names = new Intl.DisplayNames([getLang()], { type: 'currency' }); } catch { names = null; }
+  $('cur').replaceChildren(...Object.keys(CURRENCIES).map((code) =>
+    el('option', { value: code, textContent: `${code} — ${names?.of(code) ?? code}` })));
+  $('cur').value = c;
+  for (const n of document.querySelectorAll('.cur')) n.textContent = `(${CURRENCIES[c].sym.trim()})`;
+  for (const id of MONEY) $(id).inputMode = decimals() ? 'decimal' : 'numeric';
+  // Round figures worth rounding to: a thousand rupiah, a hundred yen, a dollar.
+  const steps = c === 'IDR' ? [100, 500, 1000] : decimals() ? [1, 5, 10] : [10, 100, 1000];
+  $('roundTo').replaceChildren($('roundTo').options[0], ...steps.map((x) => x * 10 ** decimals()).map((v) =>
+    el('option', { value: String(v), textContent: t('Nearest {x}', { x: cash(v).replace(/[.,]0+$/, '') }) })));
+  $('roundTo').value = String(bill.roundTo);
+  if ($('roundTo').selectedIndex < 0) $('roundTo').value = '0';
+}
+
+// Switching keeps the numbers you typed: 120.000 in rupiah is 120,000.00 in
+// dollars, not 1,200.00. Cents are lost going the other way, and the rounding
+// step is reset, since a thousand rupiah is no step at all in pounds.
+$('cur').onchange = () => {
+  const next = $('cur').value;
+  if (!Object.hasOwn(CURRENCIES, next) || next === bill.currency) return;
+  const k = 10 ** (decimals(next) - decimals(bill.currency));
+  const scale = (v) => (v === '' || v == null ? '' : String(Math.round(Number(v) * k)));
+  for (const it of bill.items) it.amount = scale(it.amount);
+  for (const key of ['serviceAmt', 'taxAmt', 'discount', 'billTotal']) bill[key] = scale(bill[key]);
+  bill.roundTo = 0;
+  bill.currency = next;
+  // The separator follows the money: 1.000 for rupiah and euros, 1,000 for the rest.
+  sep = CURRENCIES[next].sep ?? ',';
+  $('sep').value = sep;
+  try { localStorage.setItem(SEP_KEY, sep); } catch { /* private mode */ }
+  setMoneySeparator(sep);
+  save(); paintFields(); renderAll();
+};
+
 $('tos').checked = bill.taxOnService !== false;
 $('tos').onchange = () => { bill.taxOnService = $('tos').checked; save(); renderSummary(); };
 
@@ -1402,7 +1450,7 @@ async function readWithGemini(shot) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     // A picture and nothing else: there is no credential in this page to send.
-    body: JSON.stringify({ image: shot.toDataURL('image/jpeg', 0.85).split(',')[1] }),
+    body: JSON.stringify({ image: shot.toDataURL('image/jpeg', 0.85).split(',')[1], currency: getCurrency() }),
     // No response at all — offline, DNS, a blocked request — rejects with a
     // bare TypeError that never reaches the sentence below. "Failed to fetch"
     // is not a thing to tell somebody splitting a dinner bill, and without a
@@ -1542,7 +1590,7 @@ async function scanFile(file) {
       bill[key] = String(amount);
       if (pct) bill[pct] = '';
       read0 = true;
-      if (amount) charged.push(`${t(words)} Rp ${money(amount)}`);
+      if (amount) charged.push(`${t(words)} ${cash(amount)}`);
     };
     put('serviceAmt', 'servicePct', read.service, 'service');
     put('taxAmt', 'taxPct', read.tax, 'tax');
@@ -1553,7 +1601,7 @@ async function scanFile(file) {
     // between it and the items is the whole story — which is what it is for.
     if (!read0 && total != null) {
       bill.billTotal = String(total);
-      charged.push(t('a total of Rp {amt}, with service and tax worked back from it', { amt: money(total) }));
+      charged.push(t('a total of {amt}, with service and tax worked back from it', { amt: cash(total) }));
     }
     // Where you were and when. The struk knows both, and making somebody type
     // them before scanning was asking for the one thing the scan was about to
@@ -1579,7 +1627,7 @@ async function scanFile(file) {
     const { reader } = read;
     note([
       items.length
-        ? t(items.length > 1 ? '{reader} added {n} items, Rp {amt} in total.' : '{reader} added {n} item, Rp {amt} in total.', { reader, n: items.length, amt: money(sum) })
+        ? t(items.length > 1 ? '{reader} added {n} items, {amt} in total.' : '{reader} added {n} item, {amt} in total.', { reader, n: items.length, amt: cash(sum) })
         : t('Nothing came back from {reader} — no item lines it could make out, so add them by hand.', { reader }),
       charged.length ? t('It also read {list}.', { list: list(charged) }) : '',
       filled.length ? t('It set {list} from the struk.', { list: list(filled) }) : '',
@@ -1592,8 +1640,8 @@ async function scanFile(file) {
             const adds = bill.items.reduce((a, it) => a + (Number(it.amount) || 0), 0)
               + (read.service ?? 0) + (read.tax ?? 0) - (read.discount ?? 0);
             return adds === total
-              ? t('That adds up to the Rp {amt} the struk says, so the reading is sound.', { amt: money(total) })
-              : t('The struk says Rp {total}, but the lines and charges read come to Rp {adds} — something on the paper was missed.', { total: money(total), adds: money(adds) });
+              ? t('That adds up to the {amt} the struk says, so the reading is sound.', { amt: cash(total) })
+              : t('The struk says {total}, but the lines and charges read come to {adds} — something on the paper was missed.', { total: cash(total), adds: cash(adds) });
           })()
         : '',
       t(kept ? 'The photo goes at the foot of the PDF.' : 'The photo was too big to keep, so the PDF goes without it.'),
@@ -1666,23 +1714,23 @@ function messageFor(p) {
     const { owed, due } = collect(result, p.name);
     return [
       `*${label()}*`, '',
-      t('Hi {name}, you paid *Rp {amt}* up front.', { name: p.name, amt: money(result.total) }), '',
-      t('You should get back *Rp {amt}*:', { amt: money(due) }),
-      ...owed.map((o) => `• ${o.name} — Rp ${money(o.total)}`),
-      '', t('Your own share: Rp {amt}', { amt: money(p.total) }),
+      t('Hi {name}, you paid *{amt}* up front.', { name: p.name, amt: cash(result.total) }), '',
+      t('You should get back *{amt}*:', { amt: cash(due) }),
+      ...owed.map((o) => `• ${o.name} — ${cash(o.total)}`),
+      '', t('Your own share: {amt}', { amt: cash(p.total) }),
     ].join('\n');
   }
-  const lines = p.lines.map((l) => `• ${l.name || 'Item'} — Rp ${money(l.share)}${shareLabel(l) ? ` (${shareLabel(l)})` : ''}`);
+  const lines = p.lines.map((l) => `• ${l.name || 'Item'} — ${cash(l.share)}${shareLabel(l) ? ` (${shareLabel(l)})` : ''}`);
   const extras = [
-    p.service ? `${svcName()}: Rp ${money(p.service)}` : null,
-    p.tax ? `${t('Tax')}: Rp ${money(p.tax)}` : null,
-    p.discount ? `${t('Discount')}: −Rp ${money(p.discount)}` : null,
-    p.rounding ? `${t('Rounding')}: −Rp ${money(p.rounding)}` : null,
+    p.service ? `${svcName()}: ${cash(p.service)}` : null,
+    p.tax ? `${t('Tax')}: ${cash(p.tax)}` : null,
+    p.discount ? `${t('Discount')}: −${cash(p.discount)}` : null,
+    p.rounding ? `${t('Rounding')}: −${cash(p.rounding)}` : null,
   ].filter(Boolean);
   const pay = payLines();
   return [
-    `*${label()}*`, '', t('Hi {name}, your share is *Rp {amt}*', { name: p.name, amt: money(p.total) }), '',
-    ...lines, ...(lines.length ? [`${t('Subtotal')}: Rp ${money(p.subtotal)}`] : []), ...extras,
+    `*${label()}*`, '', t('Hi {name}, your share is *{amt}*', { name: p.name, amt: cash(p.total) }), '',
+    ...lines, ...(lines.length ? [`${t('Subtotal')}: ${cash(p.subtotal)}`] : []), ...extras,
     ...(bill.paidBy ? ['', t('{name} paid the bill up front.', { name: bill.paidBy })] : []),
     ...(pay.length ? ['', t('Transfer to:'), ...pay] : []),
   ].join('\n');
@@ -1785,7 +1833,7 @@ function renderSummary() {
   const items = bill.items.reduce((a, it) => a + (Number(it.amount) || 0), 0);
   const heads = bill.participants.length;
   tally('headCount', heads ? t(heads === 1 ? '{n} person' : '{n} people', { n: heads }) : '');
-  tally('itemSum', items ? `Rp ${money(items)}` : '');
+  tally('itemSum', items ? `${cash(items)}` : '');
   const box = $('summary');
   box.textContent = '';
   if (!result.people.length) {
@@ -1871,21 +1919,21 @@ function renderSummary() {
       : null;
 
     const right = el('div', { style: 'text-align:right; white-space:nowrap' }, [
-      el('div', { className: 'due' }, [el('b', { textContent: `Rp ${money(p.total)}` })]),
-      payer ? el('div', { className: 'hint', textContent: t('gets back Rp {amt}', { amt: money(collect(result, p.name).due) }) }) : null,
+      el('div', { className: 'due' }, [el('b', { textContent: `${cash(p.total)}` })]),
+      payer ? el('div', { className: 'hint', textContent: t('gets back {amt}', { amt: cash(collect(result, p.name).due) }) }) : null,
     ]);
     box.append(el('div', { className: 'share' }, [left, right, el('div', { className: 'sends' }, [send, withFile, copy])]));
   }
   renderSent();
   const sums = el('div', { className: 'totals' });
-  sums.append(el('div', {}, [el('span', { textContent: 'Subtotal' }), el('span', { textContent: `Rp ${money(result.subtotal)}` })]));
-  if (result.service) sums.append(el('div', {}, [el('span', { textContent: svcName() }), el('span', { textContent: `Rp ${money(result.service)}` })]));
-  if (result.tax) sums.append(el('div', {}, [el('span', { textContent: chargeLabel('Tax', bill.taxPct) }), el('span', { textContent: `Rp ${money(result.tax)}` })]));
+  sums.append(el('div', {}, [el('span', { textContent: 'Subtotal' }), el('span', { textContent: `${cash(result.subtotal)}` })]));
+  if (result.service) sums.append(el('div', {}, [el('span', { textContent: svcName() }), el('span', { textContent: `${cash(result.service)}` })]));
+  if (result.tax) sums.append(el('div', {}, [el('span', { textContent: chargeLabel('Tax', bill.taxPct) }), el('span', { textContent: `${cash(result.tax)}` })]));
   // ÷ the number it actually came off, which is everybody unless somebody's own
   // share was too small to take it.
-  if (result.discount) sums.append(el('div', {}, [el('span', { textContent: `${chargeLabel('Discount', bill.discountPct)} (÷${result.discountAmong})` }), el('span', { textContent: `− Rp ${money(result.discount)}` })]));
-  if (result.rounding) sums.append(el('div', {}, [el('span', { textContent: `${t('Rounding')} (÷${result.roundingAmong})` }), el('span', { textContent: `− Rp ${money(result.rounding)}` })]));
-  sums.append(el('div', { className: 'grand' }, [el('span', { textContent: 'Total' }), el('span', { textContent: `Rp ${money(result.total)}` })]));
+  if (result.discount) sums.append(el('div', {}, [el('span', { textContent: `${chargeLabel('Discount', bill.discountPct)} (÷${result.discountAmong})` }), el('span', { textContent: `− ${cash(result.discount)}` })]));
+  if (result.rounding) sums.append(el('div', {}, [el('span', { textContent: `${t('Rounding')} (÷${result.roundingAmong})` }), el('span', { textContent: `− ${cash(result.rounding)}` })]));
+  sums.append(el('div', { className: 'grand' }, [el('span', { textContent: 'Total' }), el('span', { textContent: `${cash(result.total)}` })]));
   box.append(sums);
 }
 
@@ -1975,11 +2023,11 @@ function renderCharges() {
   $('totalNote').textContent = result.service === 0
     ? 'That is exactly what the items come to, so there is nothing to add.'
     : result.service > 0
-      ? t('Rp {amt} of service and tax{rate}, spread across the items. The fields below are switched off while this has a figure in it.', { amt: money(result.service), rate })
-      : t('Rp {amt} less than the items{rate}, taken off them in proportion. The fields below are switched off while this has a figure in it.', { amt: money(-result.service), rate });
+      ? t('{amt} of service and tax{rate}, spread across the items. The fields below are switched off while this has a figure in it.', { amt: cash(result.service), rate })
+      : t('{amt} less than the items{rate}, taken off them in proportion. The fields below are switched off while this has a figure in it.', { amt: cash(-result.service), rate });
 }
 
-function renderAll() { renderPeople(); renderItems(); renderSummary(); renderCharges(); renderPhoto(); renderPays(); renderPicker(); }
+function renderAll() { setCurrency(bill.currency); paintCurrency(); renderPeople(); renderItems(); renderSummary(); renderCharges(); renderPhoto(); renderPays(); renderPicker(); }
 renderAll();
 
 // --- PDF -------------------------------------------------------------------
@@ -2053,7 +2101,7 @@ function buildPdf(H) {
 
   // "Rp" only on the figures that carry the page — repeated down a column of
   // twenty it is noise, and the column is unmistakably money without it.
-  const rp = (n) => `Rp ${money(n)}`;
+  const rp = (n) => cash(n, { pdf: true }); // ₩ and ฿ are not in the PDF's built-in font
   const amt = (n) => money(n);
 
   const row = (label, amount, { size = 10, bold = false, ink = INK, gap = 16, sub = '', tint = LABEL } = {}) => {

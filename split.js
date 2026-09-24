@@ -1,8 +1,9 @@
-// Bill math. Everything is whole rupiah — no cents in IDR.
+// Bill math. Every amount is a whole number of the currency's smallest unit —
+// rupiah, yen, won, or cents — so the maths never meets a fraction of a cent.
 // The page reaches the translations through here, so there is one copy of the
 // language in play: the ?v= must match on both sides or there would be two.
-import { getLang, t } from './i18n.js?v=3';
-export { getLang, setLang, swap, t, translateTree, watch } from './i18n.js?v=3';
+import { getLang, t } from './i18n.js?v=4';
+export { getLang, setLang, swap, t, translateTree, watch } from './i18n.js?v=4';
 // The only rule that matters: the sum of what everybody pays must equal the bill total, exactly.
 
 // Round `values` to whole rupiah so that they still add up to `target`.
@@ -212,12 +213,17 @@ const asDate = (v) => {
 const asPlace = (v) => (typeof v !== 'string' ? null
   : v.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, MAX_PLACE) || null);
 
-// The floor is a noise filter, not a rule about money: a dish under a thousand
-// rupiah does not exist, so a number that small in the item column is OCR
-// debris. A charge is different — five per cent of a 15.000 bill is 750, and
-// real — so the charges pass a floor of their own.
-const asAmount = (v, min = 1000) => {
-  const n = Math.round(Number(v));
+// The reader writes amounts as the struk prints them, in whole currency with
+// any decimals; the bill keeps smallest units. The floor is a noise filter,
+// not a rule about money: a dish under a thousand rupiah does not exist, so a
+// number that small in the item column is OCR debris. A charge is different —
+// five per cent of a 15.000 bill is 750, and real — so the charges pass a
+// floor of their own. The ceiling is 100 million smallest units: 100 juta, or
+// a million dollars.
+const ITEM_FLOOR = { IDR: 1000, KRW: 100, JPY: 10 }; // in whole currency; the rest: one cent
+const asAmount = (v, charge = false) => {
+  const n = Math.round(Number(v) * 10 ** decimals());
+  const min = charge ? 0 : Math.round((ITEM_FLOOR[cur] ?? 0) * 10 ** decimals()) || 1;
   return Number.isFinite(n) && n >= min && n <= 100_000_000 ? n : null;
 };
 
@@ -241,7 +247,7 @@ export function parseGemini(data) {
   // are cleared when they do — the two are added together, not chosen between.
   // Zero is a reading too: "Service 0.0 %  0" is a struk saying there is none,
   // and dropping it as nothing left the default 5% standing to be charged.
-  const charge = (v) => asAmount(v, 0);
+  const charge = (v) => asAmount(v, true);
   return {
     items,
     total: asAmount(data?.total),
@@ -270,9 +276,12 @@ const cell = (v) => {
 
 export function toCsv(bill, result) {
   const paidBy = bill.paidBy || '';
+  // Whole currency in the sheet, so a column of dollars adds up to dollars.
+  const d = 10 ** decimals();
   const rows = [
     [t('Bill'), bill.title?.trim() || t('Split Bill')],
     [t('Date'), bill.date || ''],
+    [t('Currency'), cur],
     [],
     [t('Item'), t('Amount'), t('Shared by')],
     ...(bill.items ?? []).map((it) => [
@@ -300,18 +309,51 @@ export function toCsv(bill, result) {
     .map((a) => [a?.bank, a?.acct, a?.name].map((v) => (v ?? '').trim()).filter(Boolean))
     .filter((a) => a.length);
   if (pay.length) rows.push([], [t('Transfer to'), ...pay[0]], ...pay.slice(1).map((a) => ['', ...a]));
+  for (const r of rows) for (let i = 0; i < r.length; i++) if (typeof r[i] === 'number') r[i] /= d;
   // `sep=,` has to reach the file unquoted, so it goes in outside the escaping.
   return ['sep=,', ...rows.map((r) => r.map(cell).join(','))].join('\r\n');
 }
 
-// Thousands separator is a preference: dots (Indonesian) or commas.
+// Thousands separator is a preference: dots (Indonesian) or commas. The
+// decimal mark is whichever of the two it isn't.
 let sep = '.';
-let locale = 'id-ID';
-export const setMoneySeparator = (s) => {
-  sep = s === ',' ? ',' : '.';
-  locale = sep === ',' ? 'en-US' : 'id-ID';
+export const setMoneySeparator = (s) => { sep = s === ',' ? ',' : '.'; };
+const mark = () => (sep === ',' ? '.' : ',');
+
+// One currency per bill. `dec` is how many digits of the smallest unit make
+// one of the currency; `sym` is how it is written before an amount, and `pdf`
+// stands in where the PDF's built-in font has no glyph for the symbol.
+export const CURRENCIES = {
+  IDR: { dec: 0, sym: 'Rp ', sep: '.' },
+  USD: { dec: 2, sym: '$' },
+  EUR: { dec: 2, sym: '€', sep: '.' },
+  GBP: { dec: 2, sym: '£' },
+  JPY: { dec: 0, sym: '¥' },
+  SGD: { dec: 2, sym: 'S$' },
+  AUD: { dec: 2, sym: 'A$' },
+  MYR: { dec: 2, sym: 'RM ' },
+  THB: { dec: 2, sym: '฿', pdf: 'THB ' },
+  CNY: { dec: 2, sym: 'CN¥' },
+  KRW: { dec: 0, sym: '₩', pdf: 'KRW ' },
+  HKD: { dec: 2, sym: 'HK$' },
 };
-export const money = (n) => new Intl.NumberFormat(locale).format(Math.round(n));
+let cur = 'IDR';
+export const setCurrency = (c) => { cur = Object.hasOwn(CURRENCIES, c) ? c : 'IDR'; };
+export const getCurrency = () => cur;
+export const decimals = (c = cur) => CURRENCIES[c].dec;
+
+// Smallest units -> "1.250.000" or "12.50", grouped by the separator setting.
+export const money = (n, c = cur) => {
+  const d = decimals(c);
+  const s = String(Math.abs(Math.round(Number(n) || 0))).padStart(d + 1, '0');
+  const whole = s.slice(0, s.length - d).replace(/\B(?=(\d{3})+(?!\d))/g, sep);
+  return (n < 0 ? '-' : '') + whole + (d ? mark() + s.slice(s.length - d) : '');
+};
+// The same, with the currency in front: "Rp 12.000", "$12.50".
+export const cash = (n, { c = cur, pdf = false } = {}) => {
+  const { sym, pdf: plain } = CURRENCIES[c];
+  return (pdf && plain ? plain : sym) + money(n, c);
+};
 
 // yyyy-mm-dd -> "29 Jul 2026". Noon, not midnight, so no timezone can drag the
 // date onto the day before. Anything unparseable comes back as the empty string.
@@ -320,11 +362,35 @@ export const fmtDate = (iso) => {
   return isNaN(d) ? '' : d.toLocaleDateString(getLang() === 'id' ? 'id-ID' : 'en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 };
 
-// What's typed into a money field -> the whole rupiah behind it, and back out
-// grouped for display. Digits only: no cents in IDR, and a decimal point would
-// be ambiguous the moment the separator is a dot.
+// What's typed into a money field -> the smallest units behind it, as a digit
+// string, and back out grouped for display. For a currency with cents the
+// decimal mark is the one the separator setting doesn't use — except that a
+// separator typed at the very end is a decimal too: grouping never ends a
+// number with one, and a phone's decimal key gives whichever its locale likes.
 export const digits = (s) => String(s ?? '').replace(/\D/g, '').replace(/^0+(?=\d)/, '');
-export const group = (s) => digits(s).replace(/\B(?=(\d{3})+(?!\d))/g, sep);
+const split = (s) => {
+  let str = String(s ?? '');
+  if (str.endsWith(sep)) str = str.slice(0, -1) + mark();
+  const i = str.lastIndexOf(mark());
+  return { whole: digits(i < 0 ? str : str.slice(0, i)), frac: i < 0 ? null : str.slice(i + 1).replace(/\D/g, '').slice(0, decimals()) };
+};
+export const toMinor = (s) => {
+  const d = decimals();
+  if (!d) return digits(s);
+  const { whole, frac } = split(s);
+  if (!whole && !frac) return '';
+  return String(Number(whole || '0') * 10 ** d + Number((frac ?? '').padEnd(d, '0')));
+};
+export const group = (s) => (digits(s) === '' ? '' : money(Number(digits(s))));
+// Mid-typing, a half-typed "12." or "12.5" has to stay as typed; padding it to
+// "12.50" under the caret would fight every keystroke.
+export const typing = (s) => {
+  const raw = toMinor(s);
+  if (!decimals()) return { raw, shown: group(raw) };
+  const { whole, frac } = split(s);
+  const shown = (whole || (frac != null ? '0' : '')).replace(/\B(?=(\d{3})+(?!\d))/g, sep) + (frac != null ? mark() + frac : '');
+  return { raw, shown };
+};
 
 // Optional phone -> the digits wa.me wants, or null (null = let WhatsApp show its contact picker).
 // ponytail: assumes Indonesia when there's no country code; type +<code> for anywhere else.

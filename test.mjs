@@ -1,6 +1,6 @@
 // node test.mjs  — fails loudly if the money math breaks.
 import assert from 'node:assert/strict';
-import { calcShares, collect, digits, fmtDate, group, money, parseGemini, roundToSum, setMoneySeparator, shareLabel, sharedByLabel, statedTotal, toCsv, waLink, waNumber, setLang, swap, t } from './split.js';
+import { calcShares, collect, digits, fmtDate, group, money, parseGemini, roundToSum, setMoneySeparator, shareLabel, sharedByLabel, statedTotal, toCsv, waLink, waNumber, setLang, swap, t, cash, setCurrency, toMinor, typing } from './split.js';
 
 // 1. The example from the brief: equal split per item, nobody pays for what they didn't eat.
 {
@@ -584,9 +584,9 @@ assert.equal(fmtDate(undefined), '');
 
 // Language: English by default, holes filled either way, and fixed text swaps
 // back and forth without losing its whitespace.
-assert.equal(t('Hi {name}, your share is *Rp {amt}*', { name: 'Ana', amt: '10.000' }), 'Hi Ana, your share is *Rp 10.000*');
+assert.equal(t('Hi {name}, your share is *{amt}*', { name: 'Ana', amt: 'Rp 10.000' }), 'Hi Ana, your share is *Rp 10.000*');
 setLang('id');
-assert.equal(t('Hi {name}, your share is *Rp {amt}*', { name: 'Ana', amt: '10.000' }), 'Halo Ana, bagianmu *Rp 10.000*');
+assert.equal(t('Hi {name}, your share is *{amt}*', { name: 'Ana', amt: 'Rp 10.000' }), 'Halo Ana, bagianmu *Rp 10.000*');
 assert.equal(swap('  Add item\n'), '  Tambah item\n');
 assert.equal(swap('Nasi Goreng'), 'Nasi Goreng');
 assert.equal(shareLabel({ took: 1, sharedBy: 3 }), '1 dari 3');
@@ -595,6 +595,38 @@ assert.ok(toCsv({ participants: [], items: [] }, calcShares({ participants: [], 
 setLang('en');
 assert.equal(swap('Tambah item'), 'Add item');
 assert.equal(shareLabel({ took: 1, sharedBy: 3 }), '1 of 3');
+
+// Currencies: amounts are smallest units, so dollars are cents and the split
+// still lands on the exact total.
+setMoneySeparator(',');
+setCurrency('USD');
+assert.equal(cash(1250), '$12.50');
+assert.equal(cash(5), '$0.05');
+assert.equal(cash(123456789), '$1,234,567.89');
+assert.equal(toMinor('12.5'), '1250');
+assert.equal(toMinor('1,234.56'), '123456');
+assert.equal(toMinor('12,'), '1200');       // a phone's decimal key that gave the separator
+assert.equal(toMinor('12.345'), '1234');    // cents stop at two
+assert.equal(toMinor(''), '');
+assert.deepEqual(typing('12.'), { raw: '1200', shown: '12.' });
+assert.deepEqual(typing('1234.5'), { raw: '123450', shown: '1,234.5' });
+{
+  const r = calcShares({ participants: ['A', 'B', 'C'], items: [{ name: 'Pizza', amount: 1000, sharedBy: [] }] });
+  assert.deepEqual(r.people.map((p) => p.total), [334, 333, 333]); // $10.00 three ways, to the cent
+  assert.equal(r.total, 1000);
+}
+assert.deepEqual(parseGemini({ items: [{ qty: 1, name: 'Burger', amount: 12.5 }], tax: 1.1 }).items, [{ name: 'Burger', amount: 1250 }]);
+assert.equal(parseGemini({ items: [], tax: 1.1 }).tax, 110);
+assert.ok(toCsv({ participants: ['A'], items: [{ name: 'X', amount: '1250', sharedBy: [] }] },
+  calcShares({ participants: ['A'], items: [{ name: 'X', amount: '1250', sharedBy: [] }] })).includes('X,12.5,'));
+setCurrency('JPY');
+assert.equal(cash(1200), '¥1,200');
+assert.equal(toMinor('1,200.7'), '12007'); // no decimals in yen: every digit counts
+setCurrency('KRW');
+assert.equal(cash(5000, { pdf: true }), 'KRW 5,000'); // the PDF font has no ₩
+setCurrency('IDR');
+setMoneySeparator('.');
+assert.equal(cash(120000), 'Rp 120.000');
 
 console.log('ok');
 

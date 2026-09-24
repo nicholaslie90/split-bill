@@ -36,21 +36,18 @@ const ID = {
   'Dinner at Sate Khas': 'Makan malam di Sate Khas',
   'Date': 'Tanggal',
   'Service, tax & discount': 'Servis, pajak & diskon',
-  'Total on the struk (Rp)': 'Total di struk (Rp)',
+  'Total on the struk': 'Total di struk',
+  'Currency': 'Mata uang',
   'Service charge %': 'Biaya servis %',
-  'Service charge (Rp)': 'Biaya servis (Rp)',
   'Tax / PPN %': 'Pajak / PPN %',
-  'Tax / PPN (Rp)': 'Pajak / PPN (Rp)',
+  'Tax / PPN': 'Pajak / PPN',
   'Charge tax on top of the service charge': 'Kenakan pajak di atas biaya servis',
-  'Discount (Rp)': 'Diskon (Rp)',
   'Discount %': 'Diskon %',
   'Either one (or both) — the discount is split evenly per person, except that nobody\'s share goes below zero: what a small share can\'t absorb comes off the others instead.':
     'Isi salah satu (atau keduanya) — diskon dibagi rata per orang, tapi bagian siapa pun tidak akan di bawah nol: sisa yang tidak tertampung bagian kecil dipotong dari yang lain.',
   'Round the total down to': 'Bulatkan total ke bawah ke',
   'Don\'t round': 'Tanpa pembulatan',
-  'Nearest 100': 'Kelipatan 100',
-  'Nearest 500': 'Kelipatan 500',
-  'Nearest 1.000': 'Kelipatan 1.000',
+  'Nearest {x}': 'Kelipatan {x}',
   'Thousands separator': 'Pemisah ribuan',
   '1.000 — dot': '1.000 — titik',
   '1,000 — comma': '1,000 — koma',
@@ -131,18 +128,18 @@ const ID = {
   'tax': 'pajak',
   'a discount of': 'diskon',
   'and': 'dan',
-  'a total of Rp {amt}, with service and tax worked back from it': 'total Rp {amt}, dengan servis dan pajak dihitung mundur dari situ',
+  'a total of {amt}, with service and tax worked back from it': 'total {amt}, dengan servis dan pajak dihitung mundur dari situ',
   'the place as {place}': 'tempatnya {place}',
   'the date as {date}': 'tanggalnya {date}',
-  '{reader} added {n} item, Rp {amt} in total.': '{reader} menambahkan {n} item, total Rp {amt}.',
-  '{reader} added {n} items, Rp {amt} in total.': '{reader} menambahkan {n} item, total Rp {amt}.',
+  '{reader} added {n} item, {amt} in total.': '{reader} menambahkan {n} item, total {amt}.',
+  '{reader} added {n} items, {amt} in total.': '{reader} menambahkan {n} item, total {amt}.',
   'Nothing came back from {reader} — no item lines it could make out, so add them by hand.':
     'Tidak ada hasil dari {reader} — tidak ada baris item yang terbaca, jadi tambahkan sendiri.',
   'It also read {list}.': 'Juga terbaca {list}.',
   'It set {list} from the struk.': 'Dari struk juga diisi {list}.',
-  'That adds up to the Rp {amt} the struk says, so the reading is sound.': 'Jumlahnya pas dengan Rp {amt} di struk, jadi pembacaannya benar.',
-  'The struk says Rp {total}, but the lines and charges read come to Rp {adds} — something on the paper was missed.':
-    'Struk menyebut Rp {total}, tapi item dan biaya yang terbaca berjumlah Rp {adds} — ada yang terlewat.',
+  'That adds up to the {amt} the struk says, so the reading is sound.': 'Jumlahnya pas dengan {amt} di struk, jadi pembacaannya benar.',
+  'The struk says {total}, but the lines and charges read come to {adds} — something on the paper was missed.':
+    'Struk menyebut {total}, tapi item dan biaya yang terbaca berjumlah {adds} — ada yang terlewat.',
   'The photo goes at the foot of the PDF.': 'Foto dilampirkan di bagian bawah PDF.',
   'The photo was too big to keep, so the PDF goes without it.': 'Foto terlalu besar untuk disimpan, jadi PDF dibuat tanpa foto.',
   'The photo is on the bill, at the foot of the PDF.': 'Foto ada di tagihan, di bagian bawah PDF.',
@@ -165,10 +162,10 @@ const ID = {
     'Opsional. Ketik angka di bagian bawah struk, lalu servis dan pajak dihitung otomatis dan dibagi ke item secara proporsional. Kosongkan untuk mengisi persentasenya sendiri.',
   'That is exactly what the items come to, so there is nothing to add.': 'Itu sama persis dengan total item, jadi tidak ada tambahan.',
   '({pct}% of the items)': '({pct}% dari total item)',
-  'Rp {amt} of service and tax{rate}, spread across the items. The fields below are switched off while this has a figure in it.':
-    'Rp {amt} untuk servis dan pajak{rate}, dibagi ke semua item. Kolom di bawah dinonaktifkan selama kolom ini terisi.',
-  'Rp {amt} less than the items{rate}, taken off them in proportion. The fields below are switched off while this has a figure in it.':
-    'Rp {amt} kurang dari total item{rate}, dipotong dari item secara proporsional. Kolom di bawah dinonaktifkan selama kolom ini terisi.',
+  '{amt} of service and tax{rate}, spread across the items. The fields below are switched off while this has a figure in it.':
+    '{amt} untuk servis dan pajak{rate}, dibagi ke semua item. Kolom di bawah dinonaktifkan selama kolom ini terisi.',
+  '{amt} less than the items{rate}, taken off them in proportion. The fields below are switched off while this has a figure in it.':
+    '{amt} kurang dari total item{rate}, dipotong dari item secara proporsional. Kolom di bawah dinonaktifkan selama kolom ini terisi.',
 
   // --- accounts
   'Remove this account': 'Hapus rekening ini',
@@ -183,7 +180,7 @@ const ID = {
   'Add participants and items first.': 'Tambahkan peserta dan item dulu.',
   '· paid up front': '· menalangi',
   'paid up front': 'menalangi',
-  'gets back Rp {amt}': 'menerima kembali Rp {amt}',
+  'gets back {amt}': 'menerima kembali {amt}',
   'Sent to all {n} — everyone has theirs.': 'Sudah dikirim ke semua {n} orang.',
   'Sent {n} of {total}.': 'Terkirim {n} dari {total}.',
   '{name} has had theirs — clear this mark': '{name} sudah dikirimi — hapus tanda ini',
@@ -203,10 +200,10 @@ const ID = {
   '{a} of {b}': '{a} dari {b}',
 
   // --- the WhatsApp message
-  'Hi {name}, you paid *Rp {amt}* up front.': 'Halo {name}, kamu menalangi *Rp {amt}*.',
-  'You should get back *Rp {amt}*:': 'Kamu akan menerima kembali *Rp {amt}*:',
-  'Your own share: Rp {amt}': 'Bagianmu sendiri: Rp {amt}',
-  'Hi {name}, your share is *Rp {amt}*': 'Halo {name}, bagianmu *Rp {amt}*',
+  'Hi {name}, you paid *{amt}* up front.': 'Halo {name}, kamu menalangi *{amt}*.',
+  'You should get back *{amt}*:': 'Kamu akan menerima kembali *{amt}*:',
+  'Your own share: {amt}': 'Bagianmu sendiri: {amt}',
+  'Hi {name}, your share is *{amt}*': 'Halo {name}, bagianmu *{amt}*',
   '{name} paid the bill up front.': '{name} sudah menalangi tagihannya.',
   'Transfer to:': 'Transfer ke:',
 
