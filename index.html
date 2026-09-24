@@ -1111,8 +1111,9 @@ $('addPerson').onclick = () => {
 typeAhead($('people'), $('addPerson'));
 
 // The phone's own contact list, names and numbers in one go. Only Chrome on
-// Android has it; everywhere else the button simply isn't there.
-if (navigator.contacts?.select && window.isSecureContext) {
+// Android has it; everywhere else the button simply isn't there. Brave keeps
+// the API but never shows the picker, so a tap there did nothing at all.
+if (navigator.contacts?.select && window.isSecureContext && !navigator.brave) {
   $('pickContacts').hidden = false;
   $('pickContacts').onclick = async () => {
     let picked;
