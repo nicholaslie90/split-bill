@@ -665,6 +665,14 @@ function el(tag, props = {}, kids = []) {
 // user saved themselves.
 const newId = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 
+// The currency the last bill was switched to, so the next one starts there.
+// Nothing chosen yet, or storage off: rupiah.
+const CUR_KEY = 'split-bill-currency';
+const lastCurrency = () => {
+  try { const c = localStorage.getItem(CUR_KEY); return Object.hasOwn(CURRENCIES, c) ? c : 'IDR'; }
+  catch { return 'IDR'; }
+};
+
 const blank = () => ({
   id: newId(),
   title: '', date: new Date().toISOString().slice(0, 10),
@@ -672,7 +680,7 @@ const blank = () => ({
   billTotal: '',
   servicePct: 5, serviceAmt: '', taxPct: 11, taxAmt: '', taxOnService: true,
   discount: '', discountPct: '', roundTo: 0,
-  pay: [], sent: [], currency: 'IDR',
+  pay: [], sent: [], currency: lastCurrency(),
 });
 
 const FIELDS = [['title', 'title'], ['date', 'date'], ['billTotal', 'billTotal'],
@@ -704,7 +712,11 @@ function clean(raw) {
   for (const k of ['serviceAmt', 'taxAmt', 'discount', 'billTotal']) b[k] = units(b[k]);
   for (const k of ['servicePct', 'taxPct', 'discountPct']) b[k] = pct(b[k]);
   b.roundTo = Number(b.roundTo) || 0;
-  b.currency = Object.hasOwn(CURRENCIES, b.currency) ? b.currency : 'IDR';
+  // A saved bill without a currency is from before there was a choice, so it is
+  // rupiah — not whatever was picked last. Only a first visit, with nothing
+  // saved at all, starts from the remembered one.
+  const fresh = !raw || typeof raw !== 'object' || !Object.keys(raw).length;
+  b.currency = Object.hasOwn(CURRENCIES, raw?.currency) ? raw.currency : fresh ? lastCurrency() : 'IDR';
   // Who has already had theirs. Kept to people who are still on the bill, so a
   // name that was removed or renamed elsewhere can't leave a mark behind.
   b.sent = (Array.isArray(b.sent) ? b.sent : []).map(String).filter((n) => b.participants.includes(n));
@@ -1079,6 +1091,7 @@ $('cur').onchange = () => {
   for (const key of ['serviceAmt', 'taxAmt', 'discount', 'billTotal']) bill[key] = scale(bill[key]);
   bill.roundTo = 0;
   bill.currency = next;
+  try { localStorage.setItem(CUR_KEY, next); } catch { /* private mode: this bill only */ }
   // The separator follows the money: 1.000 for rupiah and euros, 1,000 for the rest.
   sep = CURRENCIES[next].sep ?? ',';
   $('sep').value = sep;
