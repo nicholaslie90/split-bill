@@ -327,8 +327,12 @@ export const group = (s) => digits(s).replace(/\B(?=(\d{3})+(?!\d))/g, sep);
 export function waNumber(raw) {
   const s = String(raw ?? '').trim();
   if (!s) return null;
-  const intl = s.startsWith('+');
-  let d = s.replace(/\D/g, '');
+  // "+62 (0)812…" writes the trunk zero it tells you to drop, and "0062…" is
+  // the + dialled from a landline; both would otherwise come out as 620….
+  const t = s.replace(/\(0\)/g, '');
+  const intl = t.startsWith('+') || t.startsWith('00');
+  let d = t.replace(/\D/g, '');
+  if (t.startsWith('00')) d = d.slice(2);
   if (!intl) {
     if (d.startsWith('0')) d = '62' + d.slice(1);
     else if (!d.startsWith('62')) d = '62' + d;

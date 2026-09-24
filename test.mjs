@@ -569,6 +569,10 @@ assert.equal(waNumber(''), null);
 assert.equal(waNumber('  '), null);
 assert.equal(waNumber(undefined), null);
 assert.equal(waNumber('123'), null); // too short
+assert.equal(waNumber('+62 (0)812 3456 789'), '628123456789');
+assert.equal(waNumber('0062 812 3456 789'), '628123456789');
+assert.equal(waNumber('0812 3456 789'), '628123456789');
+assert.equal(waNumber('+65 9123 4567'), '6591234567');
 assert.ok(waLink('08123456789', 'hi').startsWith('https://wa.me/628123456789?text=hi'));
 assert.ok(waLink('', 'a b').startsWith('https://wa.me/?text=a%20b')); // no number = picker
 

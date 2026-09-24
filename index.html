@@ -649,7 +649,7 @@
 // The ?v= is not decoration: this page and split.js are cached separately, so a
 // browser holding yesterday's split.js while loading today's page would fail to
 // import and leave every button dead. Bump it whenever split.js gains an export.
-import { calcShares, collect, digits, fmtDate, group, money, parseGemini, setMoneySeparator, shareLabel, sharedByLabel, statedTotal, toCsv, waLink } from './split.js?v=10';
+import { calcShares, collect, digits, fmtDate, group, money, parseGemini, setMoneySeparator, shareLabel, sharedByLabel, statedTotal, toCsv, waLink, waNumber } from './split.js?v=11';
 
 const KEY = 'split-bill';
 const $ = (id) => document.getElementById(id);
@@ -1053,9 +1053,18 @@ function renderPeople() {
     // Caret after the prefix, not the prefix selected: tabbing in selects the
     // whole box, and the first digit typed would wipe out the 628.
     phoneIn.onfocus = () => requestAnimationFrame(() => { const n = phoneIn.value.length; phoneIn.setSelectionRange(n, n); });
-    // A pasted number is a whole number — "+62 812…" or "0812…" after the
-    // prefix would be 628+62… — so the prefix makes way for it.
-    phoneIn.onpaste = () => { if (phoneIn.value.trim() === PHONE_PREFIX) phoneIn.value = ''; };
+    // A pasted number is a whole number, copied from a contact card or a chat
+    // with its spaces, dashes, brackets and + still in it. It replaces the box
+    // — prefix and all, or "628" + "+62 812…" would be 628+62… — as the digits
+    // wa.me takes: country code first, nothing else. Something that is not a
+    // number at all goes in as pasted, for the person to see and fix.
+    phoneIn.onpaste = (e) => {
+      const n = waNumber(e.clipboardData?.getData('text'));
+      if (!n) return;
+      e.preventDefault();
+      phoneIn.value = n;
+      phoneIn.oninput();
+    };
     // Renaming moves the phone and retags every item, so nobody silently loses their share.
     nameIn.onchange = () => {
       const next = nameIn.value.trim();
