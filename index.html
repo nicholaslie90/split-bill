@@ -261,15 +261,18 @@
     flex: 0 0 auto; align-self: stretch; padding: 10px 11px; color: var(--danger);
     display: inline-flex; align-items: center; justify-content: center;
   }
-  /* The send buttons. Icon only, and 44px at the smallest, because this is
-     tapped standing up, one-handed, once for every person at the table. Solid
-     for the message everyone gets; outlined, and one glyph wider, for the one
-     that carries the file — a paperclip says it without a word of label. */
+  /* The send buttons. Labelled, 44px at the smallest, and a full-width row of
+     their own under each person, because this is tapped standing up,
+     one-handed, once for every person at the table. Solid for the message
+     everyone gets; outlined, with a paperclip, for the one that carries the
+     file. Sized by their words rather than halved, or at 360px "Send
+     attachment" is cut off. */
   button.wa {
     flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
     gap: 5px; min-width: 44px; min-height: 44px; padding: 0 11px; color: var(--wa);
   }
-  button.wa svg + svg { color: var(--muted); }
+  button.wa span { color: var(--ink); font-weight: 600; white-space: nowrap; }
+  button.wa.send span { color: inherit; }
   button.wa.bad { color: var(--danger); }
   /* Sent already. A tick beside the name rather than a dimmed row: greying out
      a row would take every figure on it below readable contrast. */
@@ -404,9 +407,11 @@
     .prog.busy > i { width: 100%; animation: none; opacity: .55; }
   }
   .hint { color: var(--muted); font-size: 13px; margin: 0; }
-  .share { display: flex; justify-content: space-between; gap: 8px; padding: 9px 0; border-top: 1px dashed var(--line); }
+  .share { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; padding: 9px 0; border-top: 1px dashed var(--line); }
   .share:first-of-type { border-top: 0; }
   .share b { font-variant-numeric: tabular-nums; }
+  .share .sends { flex: 1 0 100%; display: flex; gap: 6px; }
+  .share .sends button { flex: 1 1 auto; }
   .share ul { margin: 3px 0 0; padding-left: 16px; color: var(--muted); font-size: 13px; }
   .totals { border-top: 1px solid var(--line); margin-top: 10px; padding-top: 10px; font-size: 14px; }
   .totals div { display: flex; justify-content: space-between; }
@@ -1747,16 +1752,17 @@ function renderSummary() {
     // the share sheet, and which arrives there with its caption stripped: so
     // the words go to the clipboard on the way past, ready to paste under it.
     const what = payer ? `what ${p.name} gets back` : `${p.name} their share`;
-    const send = iconButton('wa send', WA,
-      bill.phones[p.name] ? `Send ${what} on WhatsApp` : `Send ${what} on WhatsApp — pick the contact there`,
+    const send = iconButton('wa send', WA + '<span>Send text</span>',
+      bill.phones[p.name] ? `Send text: ${what} on WhatsApp` : `Send text: ${what} on WhatsApp — pick the contact there`,
       () => { window.open(waLink(bill.phones[p.name], messageFor(p)), '_blank', 'noopener'); sent(); });
 
+    const fileLabel = `<span>${CAN_SHARE_FILE ? 'Send attachment' : 'Copy text'}</span>`;
     const mark = (ok, words) => {
-      withFile.innerHTML = (ok ? TICK : CROSS) + (CAN_SHARE_FILE ? CLIP : '');
+      withFile.innerHTML = (ok ? TICK : CROSS) + fileLabel;
       withFile.classList.toggle('bad', !ok);
       say(words);
       setTimeout(() => {
-        withFile.innerHTML = CAN_SHARE_FILE ? WA + CLIP : COPY;
+        withFile.innerHTML = (CAN_SHARE_FILE ? CLIP : COPY) + fileLabel;
         withFile.classList.remove('bad');
       }, 1400);
     };
@@ -1771,16 +1777,15 @@ function renderSummary() {
     // button copies the message instead, which is how you send from WhatsApp
     // Web, and the PDF button at the foot of the page saves the file.
     const withFile = CAN_SHARE_FILE
-      ? iconButton('wa', WA + CLIP, `Send ${what} on WhatsApp with the bill attached — the message is copied, ready to paste under it`,
+      ? iconButton('wa', CLIP + fileLabel, `Send attachment: ${what} on WhatsApp with the bill attached — the message is copied, ready to paste under it`,
           () => askStyle(() => { copyMessage(); sharePdf(); sent(); }))
-      : iconButton('wa', COPY, `Copy ${p.name}'s message`, () => copyMessage());
+      : iconButton('wa', COPY + fileLabel, `Copy text: ${p.name}'s message`, () => copyMessage());
 
     const right = el('div', { style: 'text-align:right; white-space:nowrap' }, [
       el('div', { className: 'due' }, [el('b', { textContent: `Rp ${money(p.total)}` })]),
       payer ? el('div', { className: 'hint', textContent: `gets back Rp ${money(collect(result, p.name).due)}` }) : null,
-      el('div', { style: 'margin-top:6px; display:flex; gap:6px; justify-content:flex-end' }, [send, withFile]),
     ]);
-    box.append(el('div', { className: 'share' }, [left, right]));
+    box.append(el('div', { className: 'share' }, [left, right, el('div', { className: 'sends' }, [send, withFile])]));
   }
   renderSent();
   const t = el('div', { className: 'totals' });
