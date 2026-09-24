@@ -360,12 +360,6 @@
   dialog h2 { font-size: 17px; text-transform: none; letter-spacing: -0.01em; color: var(--ink); }
   /* Two ways to have the same numbers, each with its reason under it. Stacked,
      because reading a sentence off a segmented control is nobody's idea. */
-  .pick { display: grid; gap: 8px; }
-  .pick button { display: block; width: 100%; text-align: left; padding: 12px 13px; }
-  .pick b { display: block; margin-bottom: 2px; }
-  .pick .hint { display: block; font-size: 13px; text-wrap: pretty; }
-  .pick button[aria-pressed=true] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
-  .pick button[aria-pressed=true] .hint { color: inherit; opacity: .8; }
   dialog video {
     display: block; width: 100%; max-height: 58vh; border-radius: 12px; background: #000;
   }
@@ -636,23 +630,6 @@
     <p class="hint" style="margin-top:6px">Every bill is in the picker at the top of the page, and stays in this browser. Saving one as a file is how it moves to another phone, or how you keep it after this browser forgets.</p>
   </section>
 
-  <!-- Asked at the moment the PDF is wanted, not kept on the page all day.
-       The tap that picks a setting is itself the gesture the share sheet needs,
-       so the file can go straight out from here. -->
-  <dialog id="ask" aria-labelledby="askTitle">
-    <h2 id="askTitle" style="margin-bottom:12px">Which PDF?</h2>
-    <div class="pick">
-      <button data-style="beautiful">
-        <b>Beautiful</b>
-        <span class="hint">Room to breathe, an accent rule, an inked total and a footer. The one you would send to the table.</span>
-      </button>
-      <button data-style="organised">
-        <b>Organised</b>
-        <span class="hint">The figures packed in tight, for printing and filing. The same numbers, usually shorter.</span>
-      </button>
-    </div>
-    <div class="row" style="margin-top:12px"><button id="askClose">Cancel</button></div>
-  </dialog>
 
 </main>
 
@@ -677,7 +654,6 @@ function el(tag, props = {}, kids = []) {
 }
 
 // Two ways to set the same numbers: tight enough to file, or given room.
-const PDF_STYLES = ['organised', 'beautiful'];
 
 // A bill needs a name of its own the moment there is more than one of them.
 // Local and disposable: it never leaves this browser except inside a file the
@@ -691,7 +667,7 @@ const blank = () => ({
   billTotal: '',
   servicePct: 5, serviceAmt: '', taxPct: 11, taxAmt: '', taxOnService: true,
   discount: '', discountPct: '', roundTo: 0,
-  pay: [], pdfStyle: 'beautiful', sent: [],
+  pay: [], sent: [],
 });
 
 const FIELDS = [['title', 'title'], ['date', 'date'], ['billTotal', 'billTotal'],
@@ -725,7 +701,7 @@ function clean(raw) {
   // Who has already had theirs. Kept to people who are still on the bill, so a
   // name that was removed or renamed elsewhere can't leave a mark behind.
   b.sent = (Array.isArray(b.sent) ? b.sent : []).map(String).filter((n) => b.participants.includes(n));
-  if (!PDF_STYLES.includes(b.pdfStyle)) b.pdfStyle = 'beautiful';
+  delete b.pdfStyle; // there used to be a choice of two PDF looks
 
   // One account used to live in three fields on the bill; now there is a list of
   // them. Carry the old one over rather than dropping somebody's saved details.
@@ -1817,7 +1793,7 @@ function renderSummary() {
     // Web, and the PDF button at the foot of the page saves the file.
     const withFile = CAN_SHARE_FILE
       ? iconButton('wa', CLIP + fileLabel, `Send attachment: ${what} on WhatsApp with the bill attached — the message is copied, ready to paste under it`,
-          () => askStyle(() => { copyMessage(); sharePdf(); sent(); }))
+          () => { copyMessage(); sharePdf(); sent(); })
       : iconButton('wa', COPY + fileLabel, `Copy text: ${p.name}'s message`, () => copyMessage());
 
     const right = el('div', { style: 'text-align:right; white-space:nowrap' }, [
@@ -1909,34 +1885,6 @@ $('addPay').onclick = () => {
 };
 typeAhead($('pays'), $('addPay'));
 
-// Which PDF, asked when one is actually wanted. Whatever was picked last time
-// leads, so the answer is usually the same tap in the same place.
-const ask = $('ask');
-let picked = null; // what to do once a setting has been chosen
-function askStyle(then) {
-  picked = then;
-  for (const b of ask.querySelectorAll('[data-style]')) {
-    b.setAttribute('aria-pressed', String(b.dataset.style === bill.pdfStyle));
-  }
-  ask.showModal();
-}
-for (const b of ask.querySelectorAll('[data-style]')) {
-  b.onclick = () => {
-    if (bill.pdfStyle !== b.dataset.style) { bill.pdfStyle = b.dataset.style; save(); }
-    const go = picked;
-    picked = null;
-    ask.close();
-    // Straight on, in the same tap: the share sheet only opens while the
-    // gesture that asked for it is still live.
-    go?.();
-  };
-}
-$('askClose').onclick = () => { picked = null; ask.close(); };
-ask.oncancel = () => { picked = null; }; // Esc, where the browser delivers it
-// And where it does not. Cancel is the same thing the Close button means, so it
-// goes through that rather than repeating what it does.
-ask.onkeydown = (e) => { if (e.key === 'Escape') $('askClose').click(); };
-
 // The struk's own total, once typed, is doing the job the percentage fields
 // were there for. They are left visible and switched off rather than hidden:
 // what you typed into them is still yours, and clearing the total hands the
@@ -1979,18 +1927,15 @@ function buildPdf(H) {
     return measured.getNumberOfPages() > 1 ? measured : buildPdf(measured.__h);
   }
 
-  // Two settings of the same numbers. Organised is the working copy: tight
-  // margins, everything as close to one page as it will go. Beautiful is the
-  // one you would send to the table: room to breathe, an accent borrowed from
-  // the app, an inked total and a footer. Helvetica in both: the nearest of the
-  // three faces built into a PDF to the system stack the app sets on screen,
-  // and embedding a real one would cost every export a hundred kilobytes.
-  const lush = bill.pdfStyle !== 'organised';
-  const W = 595, M = lush ? 52 : 44, RIGHT = W - M;
-  const TOP = lush ? 60 : 54, FOOT = H - 30;
+  // Room to breathe, an accent borrowed from the app, an inked total and a
+  // footer. Helvetica: the nearest of the three faces built into a PDF to the
+  // system stack the app sets on screen, and embedding a real one would cost
+  // every export a hundred kilobytes.
+  const W = 595, M = 52, RIGHT = W - M;
+  const TOP = 60, FOOT = H - 30;
   // Only the measuring pass has a floor to hit; the second is drawn at the
   // height the first came out to, so nothing may break off the bottom of it.
-  const FLOOR = H < PDF_MAX_H ? Infinity : H - (lush ? 64 : 50);
+  const FLOOR = H < PDF_MAX_H ? Infinity : H - 64;
   const doc = new jsPDF({ unit: 'pt', format: [W, H] });
   const INK = [20, 24, 31], FIGURE = [46, 52, 63], LABEL = [96, 104, 118];
   const FAINT = [152, 160, 172], HAIR = [226, 230, 235];
@@ -2025,18 +1970,17 @@ function buildPdf(H) {
   // page, its contents overleaf, reads as the end of the document.
   const heading = (label) => {
     room(52 + 3 * 16);
-    y += lush ? 30 : 24;
+    y += 30;
     put(label, M, y, { size: 8, bold: true, ink: LABEL, space: 1.5 });
-    y += lush ? 8 : 7;
+    y += 8;
     rule(y);
-    y += lush ? 17 : 15;
+    y += 17;
   };
 
-  // Beautiful puts "Rp" only on the figures that carry the page — repeated down
-  // a column of twenty it is noise, and the column is unmistakably money
-  // without it. Organised keeps it everywhere, the way a printed statement does.
+  // "Rp" only on the figures that carry the page — repeated down a column of
+  // twenty it is noise, and the column is unmistakably money without it.
   const rp = (n) => `Rp ${money(n)}`;
-  const amt = (n) => (lush ? money(n) : `Rp ${money(n)}`);
+  const amt = (n) => money(n);
 
   const row = (label, amount, { size = 10, bold = false, ink = INK, gap = 16, sub = '', tint = LABEL } = {}) => {
     room(gap);
@@ -2050,14 +1994,14 @@ function buildPdf(H) {
   };
 
   // --- masthead. The bill, and the one number everybody wants before reading on.
-  put(bill.title?.trim() || 'Split Bill', M, y + 16, { size: lush ? 23 : 19, bold: true, space: -0.4 });
-  put(rp(result.total), RIGHT, y + 16, { size: lush ? 20 : 16, bold: true, align: 'right', space: -0.3 });
+  put(bill.title?.trim() || 'Split Bill', M, y + 16, { size: 23, bold: true, space: -0.4 });
+  put(rp(result.total), RIGHT, y + 16, { size: 20, bold: true, align: 'right', space: -0.3 });
   const heads = `${result.people.length} ${result.people.length === 1 ? 'person' : 'people'}`;
   put([fmtDate(bill.date), heads].filter(Boolean).join('   ·   '), M, y + 33, { size: 9.5, ink: LABEL });
   put('total for the table', RIGHT, y + 32, { size: 8.5, ink: LABEL, align: 'right' });
-  y += lush ? 48 : 42;
+  y += 48;
   // The one deliberate stroke of colour at the top of the page.
-  rule(y, lush ? ACCENT : HAIR, lush ? 1.6 : 0.6);
+  rule(y, ACCENT, 1.6);
   y += 2;
 
   // --- who pays what, first, because that is what the PDF gets opened for.
@@ -2077,7 +2021,7 @@ function buildPdf(H) {
       ...(p.discount ? [['Discount', `- ${money(p.discount)}`]] : []),
       ...(p.rounding ? [['Rounding', `- ${money(p.rounding)}`]] : []),
     ];
-    const h = detail.length ? (lush ? 51 : 44) + detail.length * (lush ? 13 : 12.5) : (lush ? 44 : 38);
+    const h = detail.length ? 51 + detail.length * 13 : 44;
     // A card is a unit: it crosses a page whole or not at all. Only somebody
     // with about fifty items of their own could outgrow a page, and then the
     // rows simply flow on their own rather than falling off the bottom of it.
@@ -2086,27 +2030,23 @@ function buildPdf(H) {
     const figure = fronted ? PAID_FIGURE : FIGURE;
     if (whole) {
       room(h + 10 + keep);
-      const pad = lush ? 16 : 13;
+      const pad = 16;
       doc.setFillColor(...(fronted ? PAID : PANEL));
-      if (lush) {
-        doc.setDrawColor(...(fronted ? PAID_EDGE : PANEL_EDGE)).setLineWidth(0.6);
-        doc.roundedRect(M, y, RIGHT - M, h, 8, 8, 'FD');
-      } else {
-        doc.roundedRect(M, y, RIGHT - M, h, 5, 5, 'F');
-      }
-      const nameSize = lush ? 12 : 11.5;
-      put(p.name, M + pad, y + (lush ? 24 : 22), { size: nameSize, bold: true });
-      if (fronted) put(`   paid up front`, M + pad + wide(p.name, nameSize, true), y + (lush ? 24 : 22), { size: 8.5, ink: label });
-      put(rp(p.total), RIGHT - pad, y + (lush ? 24 : 23), { size: lush ? 14 : 13, bold: true, ink: fronted ? ACCENT : INK, align: 'right', space: -0.2 });
-      if (lush && detail.length) rule(y + 35, fronted ? PAID_EDGE : PANEL_EDGE, 0.6, M + pad, RIGHT - pad);
-      let at = y + (lush ? 51 : 41);
+      doc.setDrawColor(...(fronted ? PAID_EDGE : PANEL_EDGE)).setLineWidth(0.6);
+      doc.roundedRect(M, y, RIGHT - M, h, 8, 8, 'FD');
+      const nameSize = 12;
+      put(p.name, M + pad, y + 24, { size: nameSize, bold: true });
+      if (fronted) put(`   paid up front`, M + pad + wide(p.name, nameSize, true), y + 24, { size: 8.5, ink: label });
+      put(rp(p.total), RIGHT - pad, y + 24, { size: 14, bold: true, ink: fronted ? ACCENT : INK, align: 'right', space: -0.2 });
+      if (detail.length) rule(y + 35, fronted ? PAID_EDGE : PANEL_EDGE, 0.6, M + pad, RIGHT - pad);
+      let at = y + 51;
       for (const [name, amount] of detail) {
         const wa = wide(amount, 9, false) + 20;
         put(clip(name, RIGHT - 2 * pad - M - wa, 9, false), M + pad, at, { size: 9, ink: label });
         put(amount, RIGHT - pad, at, { size: 9, ink: figure, align: 'right' });
-        at += lush ? 13 : 12.5;
+        at += 13;
       }
-      y += h + (lush ? 10 : 8);
+      y += h + 10;
     } else {
       row(p.name, rp(p.total), { size: 12, bold: true, gap: 18 });
       for (const [name, amount] of detail) row(name, amount, { size: 9, ink: label, gap: 13 });
@@ -2142,13 +2082,12 @@ function buildPdf(H) {
   }
   y += 6;
   room(38);
-  // Beautiful inks the band so the one number everyone verifies is unmissable;
-  // organised keeps it light, because a filled block eats a printer's toner.
-  const band = lush ? 32 : 28, pen = lush ? [255, 255, 255] : INK;
-  doc.setFillColor(...(lush ? INK : PANEL));
-  doc.roundedRect(M, y, RIGHT - M, band, lush ? 7 : 5, lush ? 7 : 5, 'F');
-  put('TOTAL', M + (lush ? 16 : 13), y + (lush ? 21 : 18), { size: 8.5, bold: true, ink: pen, space: 1.5 });
-  put(rp(result.total), RIGHT - (lush ? 16 : 13), y + (lush ? 21 : 19), { size: lush ? 14 : 13, bold: true, ink: pen, align: 'right', space: -0.2 });
+  // An inked band, so the one number everyone verifies is unmissable.
+  const band = 32, pen = [255, 255, 255];
+  doc.setFillColor(...INK);
+  doc.roundedRect(M, y, RIGHT - M, band, 7, 7, 'F');
+  put('TOTAL', M + 16, y + 21, { size: 8.5, bold: true, ink: pen, space: 1.5 });
+  put(rp(result.total), RIGHT - 16, y + 21, { size: 14, bold: true, ink: pen, align: 'right', space: -0.2 });
   y += band;
 
   // --- where the money goes. Several accounts is the point: people hold
@@ -2177,11 +2116,11 @@ function buildPdf(H) {
     y += ih * fit;
   }
 
-  doc.__h = y + (lush ? 64 : 50); // the height the second pass is drawn at
+  doc.__h = y + 64; // the height the second pass is drawn at
 
   // A footer at the foot of the page — what makes this feel like a document
   // rather than a screenshot. No page numbers: there is only ever the one page.
-  for (let n = 1; lush && n <= doc.getNumberOfPages(); n++) {
+  for (let n = 1; n <= doc.getNumberOfPages(); n++) {
     doc.setPage(n);
     put(bill.title?.trim() || 'Split Bill', M, FOOT, { size: 7.5, ink: FAINT });
     put(fmtDate(bill.date) || '', RIGHT, FOOT, { size: 7.5, ink: FAINT, align: 'right' });
@@ -2219,7 +2158,7 @@ async function sharePdf() {
     alert(`The PDF couldn't be sent. ${e.message} You can still send the message on its own.`);
   }
 }
-$('pdf').onclick = () => askStyle(sharePdf);
+$('pdf').onclick = sharePdf;
 
 // The same bill as a spreadsheet, for your own offline history. CSV opens in
 // Excel and Sheets and stays readable in a plain text editor; the BOM is what
