@@ -646,7 +646,7 @@
 // The ?v= is not decoration: this page and split.js are cached separately, so a
 // browser holding yesterday's split.js while loading today's page would fail to
 // import and leave every button dead. Bump it whenever split.js gains an export.
-import { calcShares, collect, digits, fmtDate, getLang, group, money, parseGemini, setLang, setMoneySeparator, shareLabel, sharedByLabel, statedTotal, t, toCsv, translateTree, waLink, waNumber, watch } from './split.js?v=12';
+import { calcShares, collect, digits, fmtDate, getLang, group, money, parseGemini, setLang, setMoneySeparator, shareLabel, sharedByLabel, statedTotal, t, toCsv, translateTree, waLink, waNumber, watch } from './split.js?v=13';
 
 const KEY = 'split-bill';
 const $ = (id) => document.getElementById(id);
@@ -1412,6 +1412,14 @@ async function readWithGemini(shot) {
     // The Worker's reason is already stripped of anything about the key, so it
     // can be shown as it comes.
     const why = await res.json().catch(() => null);
+    // Out of quota, ours or Google's: say when it will work again, rounded up
+    // so "try in 1 minute" is never a minute too early.
+    if (res.status === 429) {
+      const mins = Math.max(1, Math.ceil((Number(why?.retryAfter) || 60) / 60));
+      throw new Error(mins >= 90
+        ? t('Gemini AI has reached its usage limit for now. Try again in about {n} hours.', { n: Math.round(mins / 60) })
+        : t(mins === 1 ? 'Gemini AI has reached its usage limit for now. Try again in {n} minute.' : 'Gemini AI has reached its usage limit for now. Try again in {n} minutes.', { n: mins }));
+    }
     throw new Error(why?.error ?? t('The reader could not be reached ({status}).', { status: res.status }));
   }
   const body = await res.json();

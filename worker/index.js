@@ -53,6 +53,20 @@ const GEMINI_CONFIG = {
   },
 };
 
+// Google puts the wait in a RetryInfo detail as "37s" (or "2.5s"); a
+// Retry-After header, where there is one, is plain seconds. Neither → null,
+// and the page falls back to a minute.
+function retryDelay(text, header) {
+  let secs = null;
+  try {
+    const info = JSON.parse(text)?.error?.details?.find((d) => String(d?.['@type']).endsWith('RetryInfo'));
+    const m = /^(\d+(?:\.\d+)?)s$/.exec(info?.retryDelay ?? '');
+    if (m) secs = Number(m[1]);
+  } catch { /* not JSON: fall through to the header */ }
+  if (secs == null && /^\d+$/.test(header ?? '')) secs = Number(header);
+  return secs == null ? null : Math.min(Math.max(Math.ceil(secs), 1), 86400);
+}
+
 const cors = (origin) => ({
   'Access-Control-Allow-Origin': origin,
   'Access-Control-Allow-Headers': 'Content-Type',
@@ -80,7 +94,7 @@ export default {
     const ip = req.headers.get('CF-Connecting-IP') ?? 'unknown';
     const { success } = await env.SCAN_LIMIT.limit({ key: ip });
     if (!success) {
-      return new Response(JSON.stringify({ error: 'Too many scans from here just now. Try again in a minute.' }),
+      return new Response(JSON.stringify({ error: 'Too many scans from here just now. Try again in a minute.', retryAfter: 60 }),
         { status: 429, headers: { ...head, 'Content-Type': 'application/json' } });
     }
 
@@ -107,9 +121,13 @@ export default {
     // Google's own message can name the key, the project or the quota — none of
     // which is the browser's business. The status is; the prose is not.
     if (!res.ok) {
+      const text = await res.text();
       // The owner's log is where the prose does belong: `wrangler tail`.
-      console.error('Gemini', res.status, await res.text());
-      return new Response(JSON.stringify({ error: `The reader refused the photo (${res.status}).` }),
+      console.error('Gemini', res.status, text);
+      // The one thing in a quota refusal the page may have: how long to wait,
+      // as a bare number of seconds, so it can say when to try again.
+      const retryAfter = res.status === 429 ? retryDelay(text, res.headers.get('Retry-After')) : null;
+      return new Response(JSON.stringify({ error: `The reader refused the photo (${res.status}).`, retryAfter }),
         { status: res.status === 429 ? 429 : 502, headers: { ...head, 'Content-Type': 'application/json' } });
     }
     // The candidate envelope goes back untouched: the page already knows how to
