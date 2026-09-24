@@ -1116,8 +1116,10 @@ if (navigator.contacts?.select && window.isSecureContext) {
   $('pickContacts').hidden = false;
   $('pickContacts').onclick = async () => {
     let picked;
+    // Closing the picker resolves empty; a throw is the browser refusing, and
+    // that deserves saying rather than a button that seems to do nothing.
     try { picked = await navigator.contacts.select(['name', 'tel'], { multiple: true }); }
-    catch { return; } // dismissed, or the browser said no
+    catch (e) { alert(`This browser wouldn't open your contacts (${e.name}). Try Chrome, or type the names in.`); return; }
     for (const c of picked ?? []) {
       const name = String(c.name?.[0] ?? '').trim().slice(0, 40);
       if (!name) continue;
