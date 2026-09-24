@@ -107,6 +107,8 @@ export default {
     // Google's own message can name the key, the project or the quota — none of
     // which is the browser's business. The status is; the prose is not.
     if (!res.ok) {
+      // The owner's log is where the prose does belong: `wrangler tail`.
+      console.error('Gemini', res.status, await res.text());
       return new Response(JSON.stringify({ error: `The reader refused the photo (${res.status}).` }),
         { status: res.status === 429 ? 429 : 502, headers: { ...head, 'Content-Type': 'application/json' } });
     }

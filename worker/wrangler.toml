@@ -10,3 +10,9 @@ namespace_id = "1001"
 # 20 scans a minute from one address — a table of eight rescanning a creased
 # struk never reaches it, and a script pointed at the endpoint does immediately.
 simple = { limit = 20, period = 60 }
+
+# Gemini refuses some Cloudflare edges outright ("User location is not
+# supported"), so which colo answered decided whether the struk got read. Run
+# the Worker next to Google instead of next to the phone.
+[placement]
+region = "gcp:us-central1"
