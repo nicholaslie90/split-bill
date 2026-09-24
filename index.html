@@ -419,7 +419,7 @@
   .share { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; padding: 9px 0; border-top: 1px dashed var(--line); }
   .share:first-of-type { border-top: 0; }
   .share b { font-variant-numeric: tabular-nums; }
-  .share .sends { flex: 1 0 100%; display: flex; gap: 6px; }
+  .share .sends { flex: 1 0 100%; display: flex; flex-wrap: wrap; gap: 6px; }
   .share .sends button { flex: 1 1 auto; }
   .share ul { margin: 3px 0 0; padding-left: 16px; color: var(--muted); font-size: 13px; }
   .totals { border-top: 1px solid var(--line); margin-top: 10px; padding-top: 10px; font-size: 14px; }
@@ -474,8 +474,9 @@
     <div id="people"></div>
     <div class="row" style="margin-top:10px">
       <button id="addPerson">Add participant</button>
+      <button id="pickContacts" hidden>From contacts</button>
     </div>
-    <p class="hint" style="margin-top:8px">Phone is optional — leave it at 628 and WhatsApp will ask you who to send to. Tick the box to mark who paid the whole bill up front. Each person then gets two buttons: the message on its own, or the message and the bill as a PDF.</p>
+    <p class="hint" style="margin-top:8px">Phone is optional — pick people from your contacts to fill it in, or leave it at 628 and WhatsApp will ask you who to send to. Tick the box to mark who paid the whole bill up front. Each person then gets buttons to send the message on its own, send it with the bill as a PDF, or just copy it.</p>
   </section>
 
   <h2 class="step"><b>2</b>What you ordered<span class="tally" id="itemSum" hidden></span></h2>
@@ -652,8 +653,6 @@ function el(tag, props = {}, kids = []) {
   for (const k of [].concat(kids)) if (k != null) n.append(k);
   return n;
 }
-
-// Two ways to set the same numbers: tight enough to file, or given room.
 
 // A bill needs a name of its own the moment there is more than one of them.
 // Local and disposable: it never leaves this browser except inside a file the
@@ -1110,6 +1109,26 @@ $('addPerson').onclick = () => {
   $('people').querySelector('.person:last-of-type input')?.focus();
 };
 typeAhead($('people'), $('addPerson'));
+
+// The phone's own contact list, names and numbers in one go. Only Chrome on
+// Android has it; everywhere else the button simply isn't there.
+if (navigator.contacts?.select && window.isSecureContext) {
+  $('pickContacts').hidden = false;
+  $('pickContacts').onclick = async () => {
+    let picked;
+    try { picked = await navigator.contacts.select(['name', 'tel'], { multiple: true }); }
+    catch { return; } // dismissed, or the browser said no
+    for (const c of picked ?? []) {
+      const name = String(c.name?.[0] ?? '').trim().slice(0, 40);
+      if (!name) continue;
+      const phone = (c.tel ?? []).map(waNumber).find(Boolean);
+      if (!bill.participants.includes(name)) bill.participants.push(name);
+      if (phone && !bill.phones[name]) bill.phones[name] = phone.slice(0, 24);
+    }
+    save(); renderAll();
+    markNew('people', '.person');
+  };
+}
 
 // --- items -----------------------------------------------------------------
 function renderItems() {
@@ -1653,6 +1672,7 @@ const CROSS = svg(`<path ${LINE} d="M18 6L6 18M6 6l12 12"/>`);
 // stroke as the four above, so a page full of them reads as one hand. The
 // camera replaces an emoji that was whatever font the phone happened to have.
 const PLUS = svg(`<path ${LINE} d="M12 5v14M5 12h14"/>`);
+const CONTACTS = svg(`<g ${LINE}><rect x="4" y="2" width="16" height="20" rx="2"/><circle cx="12" cy="10" r="3"/><path d="M7 18a5 5 0 0 1 10 0"/></g>`);
 const PERSON_ADD = svg(`<g ${LINE}><path d="M15 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><path d="M20 8v6M23 11h-6"/></g>`);
 const CAMERA = svg(`<g ${LINE}><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></g>`);
 const WALLET = svg(`<g ${LINE}><path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4z"/></g>`);
@@ -1675,7 +1695,7 @@ const leadIcon = (id, glyph) => {
   $(id).insertAdjacentHTML('afterbegin', glyph);
 };
 for (const [id, glyph] of [
-  ['addPerson', PERSON_ADD], ['addItem', PLUS], ['scan', CAMERA],
+  ['addPerson', PERSON_ADD], ['pickContacts', CONTACTS], ['addItem', PLUS], ['scan', CAMERA],
   ['addPay', WALLET], ['pdf', DOC], ['csv', TABLE],
   ['billNew', FILE_PLUS], ['billOpen', FOLDER], ['billSave', DOWNLOAD],
 ]) leadIcon(id, glyph);
@@ -1761,7 +1781,7 @@ function renderSummary() {
       left.append(el('ul', {}, p.lines.map((l) =>
         el('li', { textContent: `${l.name || 'Item'} — ${money(l.share)}${shareLabel(l) ? ` (${shareLabel(l)})` : ''}` }))));
     }
-    // Two ways to send, and no third. The message alone, straight to their
+    // Two ways to send, plus a plain copy. The message alone, straight to their
     // number — that is the everyday one, so it is the solid button. Or the
     // message and the bill as a file, which WhatsApp will only take through
     // the share sheet, and which arrives there with its caption stripped: so
@@ -1772,21 +1792,22 @@ function renderSummary() {
       () => { window.open(waLink(bill.phones[p.name], messageFor(p)), '_blank', 'noopener'); sent(); });
 
     const fileLabel = `<span>${CAN_SHARE_FILE ? 'Send attachment' : 'Copy text'}</span>`;
-    const mark = (ok, words) => {
-      withFile.innerHTML = (ok ? TICK : CROSS) + fileLabel;
-      withFile.classList.toggle('bad', !ok);
+    // The tick lands on whichever button asked for the copy.
+    const mark = (ok, words, [b, glyph, text] = [withFile, CAN_SHARE_FILE ? CLIP : COPY, fileLabel]) => {
+      b.innerHTML = (ok ? TICK : CROSS) + text;
+      b.classList.toggle('bad', !ok);
       say(words);
       setTimeout(() => {
-        withFile.innerHTML = (CAN_SHARE_FILE ? CLIP : COPY) + fileLabel;
-        withFile.classList.remove('bad');
+        b.innerHTML = glyph + text;
+        b.classList.remove('bad');
       }, 1400);
     };
     // Never throws and never awaits: it is called on the way into the share
     // sheet, which only opens while the tap is still live.
-    const copyMessage = () => {
+    const copyMessage = (on) => {
       const done = navigator.clipboard?.writeText(messageFor(p)); // no clipboard without https
-      if (!done) return mark(false, 'No clipboard in this browser.');
-      done.then(() => mark(true, `${p.name}'s message copied.`), () => mark(false, 'Could not copy the message.'));
+      if (!done) return mark(false, 'No clipboard in this browser.', on);
+      done.then(() => mark(true, `${p.name}'s message copied.`, on), () => mark(false, 'Could not copy the message.', on));
     };
     // Where no file can be shared — a desktop browser, mostly — the same
     // button copies the message instead, which is how you send from WhatsApp
@@ -1795,12 +1816,19 @@ function renderSummary() {
       ? iconButton('wa', CLIP + fileLabel, `Send attachment: ${what} on WhatsApp with the bill attached — the message is copied, ready to paste under it`,
           () => { copyMessage(); sharePdf(); sent(); })
       : iconButton('wa', COPY + fileLabel, `Copy text: ${p.name}'s message`, () => copyMessage());
+    // On a phone the attachment button has the file to carry, so copying the
+    // words on their own — for a group chat, or any app that isn't WhatsApp —
+    // gets its own button. Elsewhere the one above already is that.
+    const copyLabel = '<span>Copy text</span>';
+    const copy = CAN_SHARE_FILE
+      ? iconButton('wa', COPY + copyLabel, `Copy text: ${p.name}'s message`, () => copyMessage([copy, COPY, copyLabel]))
+      : null;
 
     const right = el('div', { style: 'text-align:right; white-space:nowrap' }, [
       el('div', { className: 'due' }, [el('b', { textContent: `Rp ${money(p.total)}` })]),
       payer ? el('div', { className: 'hint', textContent: `gets back Rp ${money(collect(result, p.name).due)}` }) : null,
     ]);
-    box.append(el('div', { className: 'share' }, [left, right, el('div', { className: 'sends' }, [send, withFile])]));
+    box.append(el('div', { className: 'share' }, [left, right, el('div', { className: 'sends' }, [send, withFile, copy])]));
   }
   renderSent();
   const t = el('div', { className: 'totals' });
