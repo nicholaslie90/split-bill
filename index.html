@@ -650,7 +650,7 @@
 // The ?v= is not decoration: this page and split.js are cached separately, so a
 // browser holding yesterday's split.js while loading today's page would fail to
 // import and leave every button dead. Bump it whenever split.js gains an export.
-import { CURRENCIES, calcShares, cash, collect, decimals, fmtDate, getCurrency, getLang, group, money, parseGemini, setLang, setCurrency, setMoneySeparator, shareLabel, sharedByLabel, statedTotal, t, toCsv, translateTree, typing, waLink, waNumber, watch } from './split.js?v=16';
+import { CURRENCIES, calcShares, cash, collect, decimals, fmtDate, getCurrency, getLang, group, money, parseGemini, setLang, setCurrency, setMoneySeparator, shareLabel, sharedByLabel, statedTotal, t, toCsv, translateTree, typing, waLink, waNumber, watch } from './split.js?v=17';
 
 const KEY = 'split-bill';
 const $ = (id) => document.getElementById(id);
@@ -2123,6 +2123,17 @@ function buildPdf(H) {
   // "Rp" only on the figures that carry the page — repeated down a column of
   // twenty it is noise, and the column is unmistakably money without it.
   const rp = (n) => cash(n, { pdf: true }); // ₩ and ฿ are not in the PDF's built-in font
+  // An item's name as the PDF can print it. Helvetica here is Latin-1 and not
+  // much more, so a Japanese or Thai name comes out as noise: then the
+  // translation stands in for it, keeping the quantity in front. A name it can
+  // draw keeps its place, with what it means after it.
+  const DRAWABLE = /^[\x20-\x7e\xa0-\xff€£¥•–—‘’“”…]*$/;
+  const itemName = (name, translation) => {
+    const n = name || 'Item';
+    if (!translation) return n;
+    if (DRAWABLE.test(n)) return `${n} (${translation})`;
+    return `${/^\d+x /.exec(n)?.[0] ?? ''}${translation}`;
+  };
   const amt = (n) => money(n);
 
   const row = (label, amount, { size = 10, bold = false, ink = INK, gap = 16, sub = '', tint = LABEL } = {}) => {
@@ -2158,7 +2169,7 @@ function buildPdf(H) {
     const keep = idx === result.people.length - 1 ? tail : 0;
     const fronted = p.name === bill.paidBy;
     const detail = [
-      ...p.lines.map((l) => [`${l.name || 'Item'}${shareLabel(l) ? `   ${shareLabel(l)}` : ''}`, money(l.share)]),
+      ...p.lines.map((l) => [`${itemName(l.name, l.translation)}${shareLabel(l) ? `   ${shareLabel(l)}` : ''}`, money(l.share)]),
       ...(p.service ? [[svcName(true), money(p.service)]] : []),
       ...(p.tax ? [[t('Tax'), money(p.tax)]] : []),
       ...(p.discount ? [[t('Discount'), `- ${money(p.discount)}`]] : []),
@@ -2208,7 +2219,7 @@ function buildPdf(H) {
   // --- the arithmetic behind it, for anyone who wants to check
   heading('THE BILL');
   for (const it of bill.items) {
-    row(it.name || 'Item', amt(Number(it.amount) || 0),
+    row(itemName(it.name, it.translation), amt(Number(it.amount) || 0),
         { ink: FIGURE, sub: it.sharedBy.length ? sharedByLabel(it.sharedBy) : t('everyone') });
   }
   y += 7;
