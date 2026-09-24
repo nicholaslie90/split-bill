@@ -235,7 +235,9 @@ export function parseGemini(data) {
   // then the figure it actually charged, and the figure is the one that has to
   // add up. They land in the flat-amount fields, which is why the percentages
   // are cleared when they do — the two are added together, not chosen between.
-  const charge = (v) => asAmount(v, 1);
+  // Zero is a reading too: "Service 0.0 %  0" is a struk saying there is none,
+  // and dropping it as nothing left the default 5% standing to be charged.
+  const charge = (v) => asAmount(v, 0);
   return {
     items,
     total: asAmount(data?.total),

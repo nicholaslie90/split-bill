@@ -466,7 +466,7 @@
     <div class="row" style="margin-top:10px">
       <button id="addPerson">Add participant</button>
     </div>
-    <p class="hint" style="margin-top:8px">Phone is optional — leave it blank and WhatsApp will ask you who to send to. Tick the box to mark who paid the whole bill up front. Each person then gets two buttons: the message on its own, or the message and the bill as a PDF.</p>
+    <p class="hint" style="margin-top:8px">Phone is optional — leave it at 628 and WhatsApp will ask you who to send to. Tick the box to mark who paid the whole bill up front. Each person then gets two buttons: the message on its own, or the message and the bill as a PDF.</p>
   </section>
 
   <section>
@@ -649,7 +649,7 @@
 // The ?v= is not decoration: this page and split.js are cached separately, so a
 // browser holding yesterday's split.js while loading today's page would fail to
 // import and leave every button dead. Bump it whenever split.js gains an export.
-import { calcShares, collect, digits, fmtDate, group, money, parseGemini, setMoneySeparator, shareLabel, sharedByLabel, statedTotal, toCsv, waLink } from './split.js?v=9';
+import { calcShares, collect, digits, fmtDate, group, money, parseGemini, setMoneySeparator, shareLabel, sharedByLabel, statedTotal, toCsv, waLink } from './split.js?v=10';
 
 const KEY = 'split-bill';
 const $ = (id) => document.getElementById(id);
@@ -981,7 +981,7 @@ function typeAhead(box, add) {
     const at = fields().indexOf(e.target);
     // Asked before the blur, because the blur can take this row's DOM with it.
     const row = e.target.closest('.person, .item');
-    const started = [...row.querySelectorAll('input:not([type=checkbox])')].some((f) => f.value.trim());
+    const started = [...row.querySelectorAll('input:not([type=checkbox])')].some((f) => f.value.trim() && f.value.trim() !== PHONE_PREFIX); // the prefix alone was not typed
     e.target.blur(); // lets a rename commit, and its redraw happen, first
     const next = fields()[at + 1];
     if (next) next.focus();
@@ -1026,6 +1026,7 @@ $('tos').checked = bill.taxOnService !== false;
 $('tos').onchange = () => { bill.taxOnService = $('tos').checked; save(); renderSummary(); };
 
 // --- participants ----------------------------------------------------------
+const PHONE_PREFIX = '628';
 function renderPeople() {
   const box = $('people');
   box.textContent = '';
@@ -1044,7 +1045,17 @@ function renderPeople() {
     });
     // autocomplete off deliberately: the browser's saved number is yours, and
     // this box is for the person sitting opposite.
-    const phoneIn = el('input', { type: 'tel', value: bill.phones[name] ?? '', placeholder: 'Phone (optional)', maxLength: 24, ariaLabel: 'Phone number, optional', autocomplete: 'off', enterKeyHint: 'next' });
+    // Starts at 628, because nearly every number at the table is an Indonesian
+    // mobile and that is three keystrokes nobody has to make. The bare prefix
+    // is still no number: it is never stored, so the chat still opens on the
+    // contact picker when nothing was typed after it.
+    const phoneIn = el('input', { type: 'tel', value: bill.phones[name] ?? PHONE_PREFIX, placeholder: 'Phone (optional)', maxLength: 24, ariaLabel: 'Phone number, optional', autocomplete: 'off', enterKeyHint: 'next' });
+    // Caret after the prefix, not the prefix selected: tabbing in selects the
+    // whole box, and the first digit typed would wipe out the 628.
+    phoneIn.onfocus = () => requestAnimationFrame(() => { const n = phoneIn.value.length; phoneIn.setSelectionRange(n, n); });
+    // A pasted number is a whole number — "+62 812…" or "0812…" after the
+    // prefix would be 628+62… — so the prefix makes way for it.
+    phoneIn.onpaste = () => { if (phoneIn.value.trim() === PHONE_PREFIX) phoneIn.value = ''; };
     // Renaming moves the phone and retags every item, so nobody silently loses their share.
     nameIn.onchange = () => {
       const next = nameIn.value.trim();
@@ -1061,7 +1072,7 @@ function renderPeople() {
     };
     phoneIn.oninput = () => {
       const v = phoneIn.value.trim();
-      if (v) bill.phones[bill.participants[i]] = v; else delete bill.phones[bill.participants[i]];
+      if (v && v !== PHONE_PREFIX) bill.phones[bill.participants[i]] = v; else delete bill.phones[bill.participants[i]];
       save(); renderSummary();
     };
     // Who paid the whole bill up front. One person at most — ticking someone
@@ -1457,12 +1468,16 @@ async function scanFile(file) {
     // percentages are cleared as they do — calcShares ADDS a rate to an amount
     // rather than choosing between them, so 5% left standing beside a service
     // charge read off the paper would charge the table twice.
+    // `read` counts a printed zero, `charged` only what is worth saying: a
+    // zero still has to clear the default rate beside it.
     const charged = [];
+    let read0 = false;
     const put = (key, pct, amount, words) => {
       if (amount == null) return;
       bill[key] = String(amount);
       if (pct) bill[pct] = '';
-      charged.push(`${words} Rp ${money(amount)}`);
+      read0 = true;
+      if (amount) charged.push(`${words} Rp ${money(amount)}`);
     };
     put('serviceAmt', 'servicePct', read.service, 'service');
     put('taxAmt', 'taxPct', read.tax, 'tax');
@@ -1471,7 +1486,7 @@ async function scanFile(file) {
     // them out: it wins over the fields and switches them off, so setting both
     // would throw away the figures just read. With neither, the difference
     // between it and the items is the whole story — which is what it is for.
-    if (!charged.length && total != null) {
+    if (!read0 && total != null) {
       bill.billTotal = String(total);
       charged.push(`a total of Rp ${money(total)}, with service and tax worked back from it`);
     }
@@ -1489,7 +1504,7 @@ async function scanFile(file) {
       bill.date = read.date;
       filled.push(`the date as ${fmtDate(read.date)}`);
     }
-    if (charged.length || filled.length) paintFields();
+    if (read0 || bill.billTotal || filled.length) paintFields();
     // Not `kept && save()`: that would skip the save on a bill whose photo had
     // already been dropped, and the items just read with it.
     const keptAgain = save();
@@ -1507,7 +1522,7 @@ async function scanFile(file) {
       // repeat of the line above.
       // Added up here rather than through calcShares, which is zero until
       // somebody is at the table — and at this point in the evening nobody is.
-      charged.length && total != null && !bill.billTotal
+      read0 && total != null && !bill.billTotal
         ? (() => {
             const adds = bill.items.reduce((a, it) => a + (Number(it.amount) || 0), 0)
               + (read.service ?? 0) + (read.tax ?? 0) - (read.discount ?? 0);

@@ -485,18 +485,35 @@ assert.deepEqual(roundToSum([1142.5, 1142.5], 2285), [1143, 1142]);
     assert.equal(g({ date: '2200-01-01' }).date, null);
   }
 
+  // A printed zero is a reading, not a blank: "Service 0.0 %  0" has to reach
+  // the field, or the default 5% stays and the table pays a charge nobody made.
+  {
+    const r = parseGemini({ items: [], service: 0, tax: 44100, discount: 0 });
+    assert.equal(r.service, 0);
+    assert.equal(r.discount, 0);
+    assert.equal(r.tax, 44100);
+    assert.equal(parseGemini({ items: [] }).service, null, 'not printed is still nothing');
+    assert.equal(parseGemini({ items: [], service: -5 }).service, null);
+    // And the field it lands in charges exactly nothing, with the rate cleared.
+    const bill = { participants: ['A'], items: [{ name: 'Nasi', amount: '441000', sharedBy: ['A'] }],
+      servicePct: '', serviceAmt: '0', taxPct: '', taxAmt: '44100', taxOnService: true, discount: '0', discountPct: '' };
+    const res = calcShares(bill);
+    assert.equal(res.service, 0);
+    assert.equal(res.total, 485100);
+  }
+
   // A reply longer than any real struk is truncated rather than pasted in whole.
   assert.equal(parseGemini({ items: Array(900).fill({ qty: 1, name: 'Teh', amount: 5000 }) }).items.length, 200);
 
-  // The charges come back as printed. They take a floor of 1, not the items'
+  // The charges come back as printed. They take a floor of 0, not the items'
   // 1000: five per cent of a small bill really is a few hundred rupiah, and
   // dropping it would quietly under-charge the table.
   {
     const c = parseGemini({ items: [], total: 265734, service: 750, tax: 1650, discount: 500 });
     assert.deepEqual([c.total, c.service, c.tax, c.discount], [265734, 750, 1650, 500]);
-    // Zero is "not charged", which is the same as absent — and nonsense is dropped.
+    // Zero is "charged nothing", which is not the same as absent — nonsense is dropped.
     const z = parseGemini({ items: [], service: 0, tax: -5, discount: 'lots' });
-    assert.deepEqual([z.service, z.tax, z.discount], [null, null, null]);
+    assert.deepEqual([z.service, z.tax, z.discount], [0, null, null]);
     // An item under the floor is still debris.
     assert.equal(parseGemini({ items: [{ qty: 1, name: 'Teh', amount: 900 }] }).items.length, 0);
   }
