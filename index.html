@@ -163,9 +163,24 @@
   /* The answer. Given the room, an accent heading, and the only figure on the
      page bigger than the total — because a share is what actually gets sent. */
   section.result {
-    margin: 28px 0; border-color: light-dark(#c6e0dc, #2c524d);
+    margin-bottom: 28px; border-color: light-dark(#c6e0dc, #2c524d);
   }
-  section.result > h2 { color: var(--accent); }
+  /* The numbered steps: the card's name moved out onto the page, big, so the
+     whole form reads as six things to do before a field is looked at. */
+  h2.step {
+    font-size: 17px; font-weight: 700; letter-spacing: -0.02em; text-transform: none;
+    color: var(--ink); margin: 22px 2px 8px; justify-content: flex-start; align-items: center;
+  }
+  h2.step b {
+    flex: 0 0 auto; display: grid; place-items: center; width: 26px; height: 26px;
+    border-radius: 50%; background: var(--accent); color: var(--accent-ink); font-size: 14px;
+  }
+  h2.step em {
+    font-style: normal; font-size: 12px; font-weight: 500; letter-spacing: 0; color: var(--muted);
+    border: 1px solid var(--line); border-radius: 99px; padding: 1px 8px;
+  }
+  h2.step .tally { margin-left: auto; }
+  h2.step.go { margin-top: 32px; color: var(--accent); }
   .share .due b { font-size: 18px; font-weight: 700; letter-spacing: -0.02em; }
   h2 {
     font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 10px;
@@ -460,8 +475,8 @@
   <!-- First, so the names exist before the lines do: every scanned item then
        arrives with its chips ready to tap, and the page reads top to bottom
        as who, what they had, what it came to. -->
+  <h2 class="step"><b>1</b>Who’s eating<span class="tally" id="headCount" hidden></span></h2>
   <section>
-    <h2>Participants<span class="tally" id="headCount" hidden></span></h2>
     <div id="people"></div>
     <div class="row" style="margin-top:10px">
       <button id="addPerson">Add participant</button>
@@ -469,8 +484,8 @@
     <p class="hint" style="margin-top:8px">Phone is optional — leave it at 628 and WhatsApp will ask you who to send to. Tick the box to mark who paid the whole bill up front. Each person then gets two buttons: the message on its own, or the message and the bill as a PDF.</p>
   </section>
 
+  <h2 class="step"><b>2</b>What you ordered<span class="tally" id="itemSum" hidden></span></h2>
   <section>
-    <h2>Items<span class="tally" id="itemSum" hidden></span></h2>
     <!-- Straight after the names: one photo fills in the lines and the
          charges, and everything below is then a correction rather than an
          evening of typing. What the scan is doing and what it
@@ -532,8 +547,8 @@
    <!-- After the items, because the scan fills both of these in: asking for
        them first made somebody type what they were about to be handed. Still
        here, and still editable, for the struk that prints neither. -->
+  <h2 class="step"><b>3</b>Where &amp; when<em>optional</em></h2>
   <section>
-    <h2>Where &amp; when</h2>
     <div class="grid2">
       <div><label for="title">What / where</label><input id="title" type="text" placeholder="Dinner at Sate Khas" maxlength="80" spellcheck="false" autocomplete="off"></div>
       <div><label for="date">Date</label>
@@ -544,8 +559,8 @@
 
 
 
+  <h2 class="step"><b>4</b>Service, tax &amp; discount</h2>
   <section>
-    <h2>Service, tax &amp; discount</h2>
     <!-- The quickest true thing on a struk is the figure at the bottom. Type
          it and the charges fall out of the difference; leave it and the
          percentages do the work as before. -->
@@ -585,15 +600,15 @@
     </div>
   </section>
 
+  <h2 class="step"><b>5</b>Where to transfer<em>optional</em></h2>
   <section>
-    <h2>Transfer to</h2>
     <div id="pays"></div>
     <div class="row" style="margin-top:10px"><button id="addPay">Add another account</button></div>
     <p class="hint" style="margin-top:6px">Optional, and as many as you like — a bank account, an e-wallet, a QRIS name. All of them go into every WhatsApp message and the PDF, so people can pick whichever they have.</p>
   </section>
 
+  <h2 class="step go"><b>6</b>Send everyone their share</h2>
   <section class="result">
-    <h2>Who pays what</h2>
     <div id="summary"></div>
     <p id="say" class="sr" role="status" aria-live="polite"></p>
     <!-- The two settings used to sit here all day for a choice made once, at
