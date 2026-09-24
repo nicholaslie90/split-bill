@@ -447,6 +447,10 @@
       </g>
     </svg>
     <h1>Split Bill</h1>
+    <div class="seg" id="lang" role="group" aria-label="Language" style="--n:2">
+      <button data-lang="en" aria-pressed="true">EN</button>
+      <button data-lang="id" aria-pressed="false">ID</button>
+    </div>
     <div class="seg" id="theme" role="group" aria-label="Theme">
       <button data-theme="auto" aria-pressed="true"><span>Auto</span></button>
       <button data-theme="light" aria-pressed="false"><span>Light</span></button>
@@ -642,7 +646,7 @@
 // The ?v= is not decoration: this page and split.js are cached separately, so a
 // browser holding yesterday's split.js while loading today's page would fail to
 // import and leave every button dead. Bump it whenever split.js gains an export.
-import { calcShares, collect, digits, fmtDate, group, money, parseGemini, setMoneySeparator, shareLabel, sharedByLabel, statedTotal, toCsv, waLink, waNumber } from './split.js?v=11';
+import { calcShares, collect, digits, fmtDate, getLang, group, money, parseGemini, setLang, setMoneySeparator, shareLabel, sharedByLabel, statedTotal, t, toCsv, translateTree, waLink, waNumber, watch } from './split.js?v=12';
 
 const KEY = 'split-bill';
 const $ = (id) => document.getElementById(id);
@@ -762,7 +766,7 @@ const writeShelf = () => {
   for (let left = copy.length; ; left--) {
     try { localStorage.setItem(SHELF, JSON.stringify(copy)); shelf = copy; return; }
     catch {
-      if (left <= 0) throw new Error('There is no room left to keep another bill — delete one first.');
+      if (left <= 0) throw new Error(t('There is no room left to keep another bill — delete one first.'));
       copy[left - 1].photo = '';
     }
   }
@@ -788,7 +792,7 @@ function loadBill(next) {
 // never on the shelf, so this is the one thing here that loses work — hence the
 // asking. Everything you have kept stays kept.
 function resetBill() {
-  if (!isBlank(bill) && !confirm('Clear this bill and start a fresh one? The other bills stay.')) return;
+  if (!isBlank(bill) && !confirm(t('Clear this bill and start a fresh one? The other bills stay.'))) return;
   bill = blank();
   save();
   paintFields();
@@ -819,7 +823,7 @@ addEventListener('pointerdown', (e) => {
 }, true);
 
 function renderPicker() {
-  const named = (b) => b.title.trim() || 'Untitled bill';
+  const named = (b) => b.title.trim() || t('Untitled bill');
   $('billNow').textContent = `${named(bill)} \u00b7 ${fmtDate(bill.date)}`;
   menu.textContent = '';
   for (const b of [bill, ...shelf]) {
@@ -827,13 +831,13 @@ function renderPicker() {
     const heads = b.participants.length;
     const open = el('button', {
       className: 'billopen',
-      title: here ? `${named(b)} is the bill you are in` : `Open ${named(b)}`,
+      title: here ? t('{name} is the bill you are in', { name: named(b) }) : t('Open {name}', { name: named(b) }),
       onclick: () => { showMenu(false); if (here) trigger.focus(); else loadBill(b); },
     }, [
       el('div', {}, [
         el('b', { textContent: named(b) }),
         el('div', { className: 'hint', textContent:
-          [fmtDate(b.date), heads ? `${heads} ${heads === 1 ? 'person' : 'people'}` : '', here ? 'open now' : '']
+          [fmtDate(b.date), heads ? t(heads === 1 ? '{n} person' : '{n} people', { n: heads }) : '', here ? t('open now') : '']
             .filter(Boolean).join(' \u00b7 ') }),
       ]),
       el('span', { className: 'billsum', textContent: `Rp ${money(calcShares(b).total)}` }),
@@ -845,9 +849,9 @@ function renderPicker() {
       row.append(el('span', { className: 'nodrop', ariaHidden: 'true' }));
     } else {
       row.append(el('button', {
-        className: 'icon', innerHTML: CROSS, title: `Delete ${named(b)}`, ariaLabel: `Delete ${named(b)}`,
+        className: 'icon', innerHTML: CROSS, title: t('Delete {name}', { name: named(b) }), ariaLabel: t('Delete {name}', { name: named(b) }),
         onclick: () => {
-          if (!confirm(`Delete "${named(b)}"? This cannot be undone.`)) return;
+          if (!confirm(t('Delete "{name}"? This cannot be undone.', { name: named(b) }))) return;
           shelf = shelf.filter((x) => x.id !== b.id);
           writeShelf();
           renderPicker();
@@ -877,7 +881,7 @@ $('billNew').onclick = newBill;
 // here with every item, every tag and every phone number where they were.
 $('billSave').onclick = async () => {
   try { await deliver(new File([JSON.stringify(bill, null, 2)], fileName('json'), { type: 'application/json' })); }
-  catch (e) { alert(`The bill couldn't be saved as a file. ${e.message}`); }
+  catch (e) { alert(t('The bill couldn\'t be saved as a file. {why}', { why: e.message })); }
 };
 $('billOpen').onclick = () => $('billFile').click();
 $('billFile').onchange = async () => {
@@ -885,14 +889,14 @@ $('billFile').onchange = async () => {
   $('billFile').value = ''; // so the same file can be opened twice
   if (!file) return;
   try {
-    if (file.size > 8e6) throw new Error('It is far too big to be one.');
+    if (file.size > 8e6) throw new Error(t('It is far too big to be one.'));
     const raw = JSON.parse(await file.text());
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('There is no bill inside it.');
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error(t('There is no bill inside it.'));
     // A file opened twice is the same bill twice, so it takes a fresh name of
     // its own rather than quietly replacing the copy already here.
     loadBill(clean({ ...raw, id: newId() }));
   } catch (e) {
-    alert(`That file isn't a bill this app can open. ${e.message}`);
+    alert(t('That file isn\'t a bill this app can open. {why}', { why: e.message }));
   }
 };
 
@@ -940,6 +944,29 @@ seg.onclick = (e) => {
 };
 systemDark.onchange = () => setTheme(document.documentElement.dataset.theme);
 setTheme(THEMES.includes(document.documentElement.dataset.theme) ? document.documentElement.dataset.theme : 'auto');
+
+// --- language ---------------------------------------------------------------
+// English unless this browser was told otherwise. The WhatsApp message, the PDF
+// and the spreadsheet follow it too: they go out in the language you read in.
+const langSeg = $('lang');
+function paintLang(v) {
+  setLang(v);
+  document.documentElement.lang = getLang();
+  langSeg.style.setProperty('--i', getLang() === 'id' ? 1 : 0);
+  for (const b of langSeg.children) b.setAttribute('aria-pressed', String(b.dataset.lang === getLang()));
+}
+try { paintLang(localStorage.getItem('split-bill-lang') || 'en'); } catch { paintLang('en'); }
+watch(document.body); // from here on, fixed text lands already in the right language
+langSeg.onclick = (e) => {
+  const v = e.target.closest('button')?.dataset.lang;
+  if (!v || v === getLang()) return;
+  paintLang(v);
+  try { localStorage.setItem('split-bill-lang', v); } catch { /* private mode: this visit only */ }
+  translateTree(document.body);
+  paintFields(); // the date under the date field
+  renderAll();
+  $('scanNote').textContent = noteNow();
+};
 
 // The app bar earns its hairline only once content is scrolled under it.
 const bar = document.querySelector('.bar');
@@ -1078,7 +1105,7 @@ function renderPeople() {
     // else moves the mark, and unticking clears it.
     const paid = el('input', {
       type: 'checkbox', checked: bill.paidBy === name,
-      title: `${name} paid the whole bill up front`, ariaLabel: `${name} paid the whole bill up front`,
+      title: t('{name} paid the whole bill up front', { name }), ariaLabel: t('{name} paid the whole bill up front', { name }),
       onchange: () => { bill.paidBy = paid.checked ? name : ''; save(); renderAll(); },
     });
     const del = el('button', {
@@ -1120,7 +1147,7 @@ if (navigator.contacts?.select && window.isSecureContext && !navigator.brave) {
     // Closing the picker resolves empty; a throw is the browser refusing, and
     // that deserves saying rather than a button that seems to do nothing.
     try { picked = await navigator.contacts.select(['name', 'tel'], { multiple: true }); }
-    catch (e) { alert(`This browser wouldn't open your contacts (${e.name}). Try Chrome, or type the names in.`); return; }
+    catch (e) { alert(t('This browser wouldn\'t open your contacts ({why}). Try Chrome, or type the names in.', { why: e.name })); return; }
     for (const c of picked ?? []) {
       const name = String(c.name?.[0] ?? '').trim().slice(0, 40);
       if (!name) continue;
@@ -1267,7 +1294,14 @@ $('addItem').onclick = () => {
 typeAhead($('items'), $('addItem'));
 
 // --- scanning a receipt -----------------------------------------------------
-const note = (text) => { $('scanNote').textContent = text; };
+// A note built from a function is rebuilt when the language changes, so the
+// standing instructions don't stay in the old one. A finished scan's report is
+// a plain string: it says what happened once, in the language it happened in.
+let noteNow = () => '';
+const note = (text) => {
+  noteNow = typeof text === 'function' ? text : () => text;
+  $('scanNote').textContent = noteNow();
+};
 // On or off, and nothing in between. The reader on the device used to count its
 // own progress and the bar showed the real figure; the post to Gemini is one
 // request that reports nothing until it answers, so a sweeping band says
@@ -1292,7 +1326,7 @@ const SHOT_WIDTH = 1600;
 // complaint, and turns the EXIF rotation the right way up while it is there,
 // which createImageBitmap only does if asked. So ask twice before giving up.
 async function decode(file) {
-  if (!file.size) throw new Error('That photo came back empty — if it lives in the cloud, open it in your gallery first so the phone has a copy.');
+  if (!file.size) throw new Error(t('That photo came back empty — if it lives in the cloud, open it in your gallery first so the phone has a copy.'));
   try {
     return await createImageBitmap(file, { imageOrientation: 'from-image' });
   } catch {
@@ -1303,7 +1337,7 @@ async function decode(file) {
     } catch {
       URL.revokeObjectURL(img.src);
       const kb = Math.round(file.size / 1024);
-      throw new Error(`This browser can't read that photo (${file.type || 'unknown type'}, ${kb} KB). Phones that save pictures as HEIC are the usual reason. Take the picture with the camera button instead, or save a JPEG copy of it.`);
+      throw new Error(t('This browser can\'t read that photo ({type}, {kb} KB). Phones that save pictures as HEIC are the usual reason. Take the picture with the camera button instead, or save a JPEG copy of it.', { type: file.type || t('unknown type'), kb }));
     }
   }
 }
@@ -1347,10 +1381,10 @@ const KEEP = () => [
   'Service, tax and discount come off the struk as well, so check those too.',
   'The photo is read by Google’s Gemini AI, so it leaves your device; nothing else about the bill does.',
   'If it cannot be read, nothing is guessed at — the photo stays on the bill and the lines are yours to type.',
-].join(' ');
+].map((x) => t(x)).join(' ');
 // "a, b and c" — a comma before the last of three reads as a fourth.
-const list = (xs) => (xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)}`);
-const idle = () => note(`Photograph the struk with your camera, or pick a photo you already have. ${KEEP()}`);
+const list = (xs) => (xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} ${t('and')} ${xs.at(-1)}`);
+const idle = () => note(() => `${t('Photograph the struk with your camera, or pick a photo you already have.')} ${KEEP()}`);
 
 idle();
 
@@ -1362,7 +1396,7 @@ idle();
 const SCAN_URL = 'https://split-bill-scan.nicholaslie90.workers.dev';
 
 async function readWithGemini(shot) {
-  note('Sending the photo to Gemini AI to be read…');
+  note(() => t('Sending the photo to Gemini AI to be read…'));
   showProg(true);
   const res = await fetch(SCAN_URL, {
     method: 'POST',
@@ -1373,12 +1407,12 @@ async function readWithGemini(shot) {
     // bare TypeError that never reaches the sentence below. "Failed to fetch"
     // is not a thing to tell somebody splitting a dinner bill, and without a
     // full stop it runs into whatever the note says next.
-  }).catch(() => { throw new Error('Gemini AI could not be reached.'); });
+  }).catch(() => { throw new Error(t('Gemini AI could not be reached.')); });
   if (!res.ok) {
     // The Worker's reason is already stripped of anything about the key, so it
     // can be shown as it comes.
     const why = await res.json().catch(() => null);
-    throw new Error(why?.error ?? `The reader could not be reached (${res.status}).`);
+    throw new Error(why?.error ?? t('The reader could not be reached ({status}).', { status: res.status }));
   }
   const body = await res.json();
   const text = body?.candidates?.[0]?.content?.parts?.map((x) => x.text).filter(Boolean).join('') ?? '';
@@ -1388,8 +1422,8 @@ async function readWithGemini(shot) {
     // act on; the finish reason names the usual culprits — a filtered image, a
     // reply cut off mid-JSON — and the first words of the answer name the rest.
     const why = body?.candidates?.[0]?.finishReason;
-    throw new Error(`Gemini sent back something that was not a receipt${why && why !== 'STOP' ? ` (${why})` : ''}.`
-      + (text ? ` It said: ${text.slice(0, 120)}` : ' It said nothing at all.'));
+    throw new Error(t('Gemini sent back something that was not a receipt{why}.', { why: why && why !== 'STOP' ? ` (${why})` : '' })
+      + ' ' + (text ? t('It said: {text}', { text: text.slice(0, 120) }) : t('It said nothing at all.')));
   }
 }
 
@@ -1428,7 +1462,7 @@ $('scan').onclick = async () => {
       video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 } },
     });
   } catch {
-    note(`Couldn't open the camera — pick a photo instead. ${KEEP()}`);
+    note(() => `${t('Couldn\'t open the camera — pick a photo instead.')} ${KEEP()}`);
     return $('shot').click();
   }
   feed.srcObject = stream;
@@ -1462,7 +1496,7 @@ async function scanFile(file) {
   // Say so the moment the photo arrives. Decoding a 12 MP picture takes long
   // enough on a phone to look like nothing happened at all, and the reader's
   // own first word comes only after it.
-  note('Reading the photo…');
+  note(() => t('Reading the photo…'));
   showProg(true);
   try {
     const shot = await prepare(file);
@@ -1499,7 +1533,7 @@ async function scanFile(file) {
       bill[key] = String(amount);
       if (pct) bill[pct] = '';
       read0 = true;
-      if (amount) charged.push(`${words} Rp ${money(amount)}`);
+      if (amount) charged.push(`${t(words)} Rp ${money(amount)}`);
     };
     put('serviceAmt', 'servicePct', read.service, 'service');
     put('taxAmt', 'taxPct', read.tax, 'tax');
@@ -1510,7 +1544,7 @@ async function scanFile(file) {
     // between it and the items is the whole story — which is what it is for.
     if (!read0 && total != null) {
       bill.billTotal = String(total);
-      charged.push(`a total of Rp ${money(total)}, with service and tax worked back from it`);
+      charged.push(t('a total of Rp {amt}, with service and tax worked back from it', { amt: money(total) }));
     }
     // Where you were and when. The struk knows both, and making somebody type
     // them before scanning was asking for the one thing the scan was about to
@@ -1520,11 +1554,11 @@ async function scanFile(file) {
     const filled = [];
     if (read.place && !bill.title.trim()) {
       bill.title = read.place;
-      filled.push(`the place as ${read.place}`);
+      filled.push(t('the place as {place}', { place: read.place }));
     }
     if (read.date && read.date !== bill.date) {
       bill.date = read.date;
-      filled.push(`the date as ${fmtDate(read.date)}`);
+      filled.push(t('the date as {date}', { date: fmtDate(read.date) }));
     }
     if (read0 || bill.billTotal || filled.length) paintFields();
     // Not `kept && save()`: that would skip the save on a bill whose photo had
@@ -1536,10 +1570,10 @@ async function scanFile(file) {
     const reader = 'Gemini AI';
     note([
       items.length
-        ? `Gemini AI added ${items.length} item${items.length > 1 ? 's' : ''}, Rp ${money(sum)} in total.`
-        : `Nothing came back from ${reader} — no item lines it could make out, so add them by hand.`,
-      charged.length ? `It also read ${list(charged)}.` : '',
-      filled.length ? `It set ${list(filled)} from the struk.` : '',
+        ? t(items.length > 1 ? 'Gemini AI added {n} items, Rp {amt} in total.' : 'Gemini AI added {n} item, Rp {amt} in total.', { n: items.length, amt: money(sum) })
+        : t('Nothing came back from {reader} — no item lines it could make out, so add them by hand.', { reader }),
+      charged.length ? t('It also read {list}.', { list: list(charged) }) : '',
+      filled.length ? t('It set {list} from the struk.', { list: list(filled) }) : '',
       // Said only when it was not used, so it is a cross-check rather than a
       // repeat of the line above.
       // Added up here rather than through calcShares, which is zero until
@@ -1549,17 +1583,17 @@ async function scanFile(file) {
             const adds = bill.items.reduce((a, it) => a + (Number(it.amount) || 0), 0)
               + (read.service ?? 0) + (read.tax ?? 0) - (read.discount ?? 0);
             return adds === total
-              ? `That adds up to the Rp ${money(total)} the struk says, so the reading is sound.`
-              : `The struk says Rp ${money(total)}, but the lines and charges read come to Rp ${money(adds)} — something on the paper was missed.`;
+              ? t('That adds up to the Rp {amt} the struk says, so the reading is sound.', { amt: money(total) })
+              : t('The struk says Rp {total}, but the lines and charges read come to Rp {adds} — something on the paper was missed.', { total: money(total), adds: money(adds) });
           })()
         : '',
-      kept ? 'The photo goes at the foot of the PDF.' : 'The photo was too big to keep, so the PDF goes without it.',
+      t(kept ? 'The photo goes at the foot of the PDF.' : 'The photo was too big to keep, so the PDF goes without it.'),
       KEEP(),
     ].filter(Boolean).join(' '));
   } catch (e) {
     // The reading is what failed; the photo is already on the bill. Say so, or
     // it reads as a scan that achieved nothing at all.
-    note([e.message, bill.photo ? 'The photo is on the bill, at the foot of the PDF.' : '', KEEP()]
+    note([e.message, bill.photo ? t('The photo is on the bill, at the foot of the PDF.') : '', KEEP()]
       .filter(Boolean).join(' '));
   } finally {
     showProg(false);
@@ -1591,14 +1625,14 @@ strukBox.onkeydown = (e) => { if (e.key === 'Escape') strukBox.close(); };
 // --- summary + sharing ------------------------------------------------------
 let result = { people: [], subtotal: 0, service: 0, tax: 0, total: 0 };
 
-const label = () => `${bill.title?.trim() || 'Split Bill'}${fmtDate(bill.date) ? ` (${fmtDate(bill.date)})` : ''}`;
+const label = () => `${bill.title?.trim() || t('Split Bill')}${fmtDate(bill.date) ? ` (${fmtDate(bill.date)})` : ''}`;
 // "Service 5%" when a percentage drives it, plain "Service" when it's a flat amount.
-const chargeLabel = (name, pct) => `${name}${Number(pct) ? ` ${pct}%` : ''}`;
+const chargeLabel = (name, pct) => `${t(name)}${Number(pct) ? ` ${pct}%` : ''}`;
 // A percentage names its own rate. A charge worked back from the printed total
 // is service and tax at once and cannot say which is which, and if the total
 // came in under the items it is not a charge at all.
 const svcName = (long) => statedTotal(bill) != null
-  ? (result.service < 0 ? 'Less than the items' : 'Service & tax')
+  ? t(result.service < 0 ? 'Less than the items' : 'Service & tax')
   : chargeLabel(long ? 'Service charge' : 'Service', bill.servicePct);
 
 // Where the money can go. One entry per account — "BCA 1234567890" with
@@ -1623,25 +1657,25 @@ function messageFor(p) {
     const { owed, due } = collect(result, p.name);
     return [
       `*${label()}*`, '',
-      `Hi ${p.name}, you paid *Rp ${money(result.total)}* up front.`, '',
-      `You should get back *Rp ${money(due)}*:`,
+      t('Hi {name}, you paid *Rp {amt}* up front.', { name: p.name, amt: money(result.total) }), '',
+      t('You should get back *Rp {amt}*:', { amt: money(due) }),
       ...owed.map((o) => `• ${o.name} — Rp ${money(o.total)}`),
-      '', `Your own share: Rp ${money(p.total)}`,
+      '', t('Your own share: Rp {amt}', { amt: money(p.total) }),
     ].join('\n');
   }
   const lines = p.lines.map((l) => `• ${l.name || 'Item'} — Rp ${money(l.share)}${shareLabel(l) ? ` (${shareLabel(l)})` : ''}`);
   const extras = [
     p.service ? `${svcName()}: Rp ${money(p.service)}` : null,
-    p.tax ? `Tax: Rp ${money(p.tax)}` : null,
-    p.discount ? `Discount: −Rp ${money(p.discount)}` : null,
-    p.rounding ? `Rounding: −Rp ${money(p.rounding)}` : null,
+    p.tax ? `${t('Tax')}: Rp ${money(p.tax)}` : null,
+    p.discount ? `${t('Discount')}: −Rp ${money(p.discount)}` : null,
+    p.rounding ? `${t('Rounding')}: −Rp ${money(p.rounding)}` : null,
   ].filter(Boolean);
   const pay = payLines();
   return [
-    `*${label()}*`, '', `Hi ${p.name}, your share is *Rp ${money(p.total)}*`, '',
-    ...lines, ...(lines.length ? [`Subtotal: Rp ${money(p.subtotal)}`] : []), ...extras,
-    ...(bill.paidBy ? ['', `${bill.paidBy} paid the bill up front.`] : []),
-    ...(pay.length ? ['', 'Transfer to:', ...pay] : []),
+    `*${label()}*`, '', t('Hi {name}, your share is *Rp {amt}*', { name: p.name, amt: money(p.total) }), '',
+    ...lines, ...(lines.length ? [`${t('Subtotal')}: Rp ${money(p.subtotal)}`] : []), ...extras,
+    ...(bill.paidBy ? ['', t('{name} paid the bill up front.', { name: bill.paidBy })] : []),
+    ...(pay.length ? ['', t('Transfer to:'), ...pay] : []),
   ].join('\n');
 }
 
@@ -1741,7 +1775,7 @@ function renderSummary() {
   // figure being compared against the bottom of the struk.
   const items = bill.items.reduce((a, it) => a + (Number(it.amount) || 0), 0);
   const heads = bill.participants.length;
-  tally('headCount', heads ? `${heads} ${heads === 1 ? 'person' : 'people'}` : '');
+  tally('headCount', heads ? t(heads === 1 ? '{n} person' : '{n} people', { n: heads }) : '');
   tally('itemSum', items ? `Rp ${money(items)}` : '');
   const box = $('summary');
   box.textContent = '';
@@ -1760,15 +1794,15 @@ function renderSummary() {
     const n = result.people.filter((x) => bill.sent.includes(x.name)).length;
     counter.hidden = !n;
     counter.textContent = n === result.people.length
-      ? `Sent to all ${n} — everyone has theirs.`
-      : `Sent ${n} of ${result.people.length}.`;
+      ? t('Sent to all {n} — everyone has theirs.', { n })
+      : t('Sent {n} of {total}.', { n, total: result.people.length });
   };
 
   for (const p of result.people) {
     const payer = p.name === bill.paidBy;
     // The tick is the mark and the way out of it: a mis-tap that says "sent"
     // has to be undoable, or the count lies for the rest of the evening.
-    const tick = iconButton('tick', TICK, `${p.name} has had theirs — clear this mark`, () => {
+    const tick = iconButton('tick', TICK, t('{name} has had theirs — clear this mark', { name: p.name }), () => {
       bill.sent = bill.sent.filter((n) => n !== p.name);
       save(); tick.hidden = true; renderSent();
     });
@@ -1789,12 +1823,12 @@ function renderSummary() {
     // message and the bill as a file, which WhatsApp will only take through
     // the share sheet, and which arrives there with its caption stripped: so
     // the words go to the clipboard on the way past, ready to paste under it.
-    const what = payer ? `what ${p.name} gets back` : `${p.name} their share`;
-    const send = iconButton('wa send', WA + '<span>Send text</span>',
-      bill.phones[p.name] ? `Send text: ${what} on WhatsApp` : `Send text: ${what} on WhatsApp — pick the contact there`,
+    const what = t(payer ? 'what {name} gets back' : '{name} their share', { name: p.name });
+    const send = iconButton('wa send', WA + `<span>${t('Send text')}</span>`,
+      t(bill.phones[p.name] ? 'Send text: {what} on WhatsApp' : 'Send text: {what} on WhatsApp — pick the contact there', { what }),
       () => { window.open(waLink(bill.phones[p.name], messageFor(p)), '_blank', 'noopener'); sent(); });
 
-    const fileLabel = `<span>${CAN_SHARE_FILE ? 'Send attachment' : 'Copy text'}</span>`;
+    const fileLabel = `<span>${t(CAN_SHARE_FILE ? 'Send attachment' : 'Copy text')}</span>`;
     // The tick lands on whichever button asked for the copy.
     const mark = (ok, words, [b, glyph, text] = [withFile, CAN_SHARE_FILE ? CLIP : COPY, fileLabel]) => {
       b.innerHTML = (ok ? TICK : CROSS) + text;
@@ -1809,41 +1843,41 @@ function renderSummary() {
     // sheet, which only opens while the tap is still live.
     const copyMessage = (on) => {
       const done = navigator.clipboard?.writeText(messageFor(p)); // no clipboard without https
-      if (!done) return mark(false, 'No clipboard in this browser.', on);
-      done.then(() => mark(true, `${p.name}'s message copied.`, on), () => mark(false, 'Could not copy the message.', on));
+      if (!done) return mark(false, t('No clipboard in this browser.'), on);
+      done.then(() => mark(true, t('{name}\'s message copied.', { name: p.name }), on), () => mark(false, t('Could not copy the message.'), on));
     };
     // Where no file can be shared — a desktop browser, mostly — the same
     // button copies the message instead, which is how you send from WhatsApp
     // Web, and the PDF button at the foot of the page saves the file.
     const withFile = CAN_SHARE_FILE
-      ? iconButton('wa', CLIP + fileLabel, `Send attachment: ${what} on WhatsApp with the bill attached — the message is copied, ready to paste under it`,
+      ? iconButton('wa', CLIP + fileLabel, t('Send attachment: {what} on WhatsApp with the bill attached — the message is copied, ready to paste under it', { what }),
           () => { copyMessage(); sharePdf(); sent(); })
-      : iconButton('wa', COPY + fileLabel, `Copy text: ${p.name}'s message`, () => copyMessage());
+      : iconButton('wa', COPY + fileLabel, t('Copy text: {name}\'s message', { name: p.name }), () => copyMessage());
     // On a phone the attachment button has the file to carry, so copying the
     // words on their own — for a group chat, or any app that isn't WhatsApp —
     // gets its own button. Elsewhere the one above already is that.
-    const copyLabel = '<span>Copy text</span>';
+    const copyLabel = `<span>${t('Copy text')}</span>`;
     const copy = CAN_SHARE_FILE
-      ? iconButton('wa', COPY + copyLabel, `Copy text: ${p.name}'s message`, () => copyMessage([copy, COPY, copyLabel]))
+      ? iconButton('wa', COPY + copyLabel, t('Copy text: {name}\'s message', { name: p.name }), () => copyMessage([copy, COPY, copyLabel]))
       : null;
 
     const right = el('div', { style: 'text-align:right; white-space:nowrap' }, [
       el('div', { className: 'due' }, [el('b', { textContent: `Rp ${money(p.total)}` })]),
-      payer ? el('div', { className: 'hint', textContent: `gets back Rp ${money(collect(result, p.name).due)}` }) : null,
+      payer ? el('div', { className: 'hint', textContent: t('gets back Rp {amt}', { amt: money(collect(result, p.name).due) }) }) : null,
     ]);
     box.append(el('div', { className: 'share' }, [left, right, el('div', { className: 'sends' }, [send, withFile, copy])]));
   }
   renderSent();
-  const t = el('div', { className: 'totals' });
-  t.append(el('div', {}, [el('span', { textContent: 'Subtotal' }), el('span', { textContent: `Rp ${money(result.subtotal)}` })]));
-  if (result.service) t.append(el('div', {}, [el('span', { textContent: svcName() }), el('span', { textContent: `Rp ${money(result.service)}` })]));
-  if (result.tax) t.append(el('div', {}, [el('span', { textContent: chargeLabel('Tax', bill.taxPct) }), el('span', { textContent: `Rp ${money(result.tax)}` })]));
+  const sums = el('div', { className: 'totals' });
+  sums.append(el('div', {}, [el('span', { textContent: 'Subtotal' }), el('span', { textContent: `Rp ${money(result.subtotal)}` })]));
+  if (result.service) sums.append(el('div', {}, [el('span', { textContent: svcName() }), el('span', { textContent: `Rp ${money(result.service)}` })]));
+  if (result.tax) sums.append(el('div', {}, [el('span', { textContent: chargeLabel('Tax', bill.taxPct) }), el('span', { textContent: `Rp ${money(result.tax)}` })]));
   // ÷ the number it actually came off, which is everybody unless somebody's own
   // share was too small to take it.
-  if (result.discount) t.append(el('div', {}, [el('span', { textContent: `${chargeLabel('Discount', bill.discountPct)} (÷${result.discountAmong})` }), el('span', { textContent: `− Rp ${money(result.discount)}` })]));
-  if (result.rounding) t.append(el('div', {}, [el('span', { textContent: `Rounding (÷${result.roundingAmong})` }), el('span', { textContent: `− Rp ${money(result.rounding)}` })]));
-  t.append(el('div', { className: 'grand' }, [el('span', { textContent: 'Total' }), el('span', { textContent: `Rp ${money(result.total)}` })]));
-  box.append(t);
+  if (result.discount) sums.append(el('div', {}, [el('span', { textContent: `${chargeLabel('Discount', bill.discountPct)} (÷${result.discountAmong})` }), el('span', { textContent: `− Rp ${money(result.discount)}` })]));
+  if (result.rounding) sums.append(el('div', {}, [el('span', { textContent: `${t('Rounding')} (÷${result.roundingAmong})` }), el('span', { textContent: `− Rp ${money(result.rounding)}` })]));
+  sums.append(el('div', { className: 'grand' }, [el('span', { textContent: 'Total' }), el('span', { textContent: `Rp ${money(result.total)}` })]));
+  box.append(sums);
 }
 
 // The struk photo has nowhere to show itself until the PDF is opened, so this
@@ -1852,7 +1886,7 @@ function renderSummary() {
 function renderPhoto() {
   const kb = Math.round((bill.photo.length * 3) / 4096); // base64 back to kilobytes
   $('photoNote').textContent = bill.photo
-    ? `Struk photo attached, ${kb} KB — it goes at the foot of the PDF.`
+    ? t('Struk photo attached, {kb} KB — it goes at the foot of the PDF.', { kb })
     : 'No struk photo yet — scanning one attaches it. Without it the PDF is just the numbers.';
   const thumb = $('photoThumb');
   // Never src="" — an empty src is a request for the page itself.
@@ -1865,14 +1899,14 @@ function renderPhoto() {
   // scan already does that, and two doors to one room was the whole problem.
   $('photoDrop').hidden = !bill.photo;
   $('photoDrop').classList.add('ico');
-  $('photoDrop').innerHTML = `${CROSS}<span>Remove photo</span>`;
+  $('photoDrop').innerHTML = `${CROSS}<span>${t('Remove photo')}</span>`;
 }
 
 $('photoDrop').onclick = () => {
   bill.photo = '';
   save();
   renderPhoto();
-  note(`Photo removed, so the PDF goes without it. Scanning again attaches a new one. ${KEEP()}`);
+  note(() => `${t('Photo removed, so the PDF goes without it. Scanning again attaches a new one.')} ${KEEP()}`);
 };
 
 // Transfer accounts, in the shape of the participant rows above: bank and
@@ -1928,12 +1962,12 @@ function renderCharges() {
     $('totalNote').textContent = 'Optional. Type the figure at the bottom of the struk and the service and tax work themselves out, spread across the items in proportion. Leave it blank to set the percentages yourself.';
     return;
   }
-  const rate = result.subtotal ? ` (${(Math.abs(result.service) / result.subtotal * 100).toFixed(1).replace('.', sep === ',' ? ',' : '.')}% of the items)` : '';
+  const rate = result.subtotal ? ' ' + t('({pct}% of the items)', { pct: (Math.abs(result.service) / result.subtotal * 100).toFixed(1).replace('.', sep === ',' ? ',' : '.') }) : '';
   $('totalNote').textContent = result.service === 0
     ? 'That is exactly what the items come to, so there is nothing to add.'
     : result.service > 0
-      ? `Rp ${money(result.service)} of service and tax${rate}, spread across the items. The fields below are switched off while this has a figure in it.`
-      : `Rp ${money(-result.service)} less than the items${rate}, taken off them in proportion. The fields below are switched off while this has a figure in it.`;
+      ? t('Rp {amt} of service and tax{rate}, spread across the items. The fields below are switched off while this has a figure in it.', { amt: money(result.service), rate })
+      : t('Rp {amt} less than the items{rate}, taken off them in proportion. The fields below are switched off while this has a figure in it.', { amt: money(-result.service), rate });
 }
 
 function renderAll() { renderPeople(); renderItems(); renderSummary(); renderCharges(); renderPhoto(); renderPays(); renderPicker(); }
@@ -1949,7 +1983,7 @@ renderAll();
 const PDF_MAX_H = 14400; // the ceiling every PDF viewer honours (200in)
 function buildPdf(H) {
   const { jsPDF } = window.jspdf ?? {};
-  if (!jsPDF) throw new Error('PDF library did not load — check your connection.');
+  if (!jsPDF) throw new Error(t('PDF library did not load — check your connection.'));
   if (H == null) {
     const measured = buildPdf(PDF_MAX_H);
     // A bill that outgrows even 14400pt goes out as it was measured: several
@@ -2002,7 +2036,7 @@ function buildPdf(H) {
   const heading = (label) => {
     room(52 + 3 * 16);
     y += 30;
-    put(label, M, y, { size: 8, bold: true, ink: LABEL, space: 1.5 });
+    put(t(label), M, y, { size: 8, bold: true, ink: LABEL, space: 1.5 });
     y += 8;
     rule(y);
     y += 17;
@@ -2025,11 +2059,11 @@ function buildPdf(H) {
   };
 
   // --- masthead. The bill, and the one number everybody wants before reading on.
-  put(bill.title?.trim() || 'Split Bill', M, y + 16, { size: 23, bold: true, space: -0.4 });
+  put(bill.title?.trim() || t('Split Bill'), M, y + 16, { size: 23, bold: true, space: -0.4 });
   put(rp(result.total), RIGHT, y + 16, { size: 20, bold: true, align: 'right', space: -0.3 });
-  const heads = `${result.people.length} ${result.people.length === 1 ? 'person' : 'people'}`;
+  const heads = t(result.people.length === 1 ? '{n} person' : '{n} people', { n: result.people.length });
   put([fmtDate(bill.date), heads].filter(Boolean).join('   ·   '), M, y + 33, { size: 9.5, ink: LABEL });
-  put('total for the table', RIGHT, y + 32, { size: 8.5, ink: LABEL, align: 'right' });
+  put(t('total for the table'), RIGHT, y + 32, { size: 8.5, ink: LABEL, align: 'right' });
   y += 48;
   // The one deliberate stroke of colour at the top of the page.
   rule(y, ACCENT, 1.6);
@@ -2048,9 +2082,9 @@ function buildPdf(H) {
     const detail = [
       ...p.lines.map((l) => [`${l.name || 'Item'}${shareLabel(l) ? `   ${shareLabel(l)}` : ''}`, money(l.share)]),
       ...(p.service ? [[svcName(true), money(p.service)]] : []),
-      ...(p.tax ? [['Tax', money(p.tax)]] : []),
-      ...(p.discount ? [['Discount', `- ${money(p.discount)}`]] : []),
-      ...(p.rounding ? [['Rounding', `- ${money(p.rounding)}`]] : []),
+      ...(p.tax ? [[t('Tax'), money(p.tax)]] : []),
+      ...(p.discount ? [[t('Discount'), `- ${money(p.discount)}`]] : []),
+      ...(p.rounding ? [[t('Rounding'), `- ${money(p.rounding)}`]] : []),
     ];
     const h = detail.length ? 51 + detail.length * 13 : 44;
     // A card is a unit: it crosses a page whole or not at all. Only somebody
@@ -2067,7 +2101,7 @@ function buildPdf(H) {
       doc.roundedRect(M, y, RIGHT - M, h, 8, 8, 'FD');
       const nameSize = 12;
       put(p.name, M + pad, y + 24, { size: nameSize, bold: true });
-      if (fronted) put(`   paid up front`, M + pad + wide(p.name, nameSize, true), y + 24, { size: 8.5, ink: label });
+      if (fronted) put(`   ${t('paid up front')}`, M + pad + wide(p.name, nameSize, true), y + 24, { size: 8.5, ink: label });
       put(rp(p.total), RIGHT - pad, y + 24, { size: 14, bold: true, ink: fronted ? ACCENT : INK, align: 'right', space: -0.2 });
       if (detail.length) rule(y + 35, fronted ? PAID_EDGE : PANEL_EDGE, 0.6, M + pad, RIGHT - pad);
       let at = y + 51;
@@ -2089,7 +2123,7 @@ function buildPdf(H) {
   // page that moves the other way, so it is the only other one in the accent.
   if (bill.paidBy) {
     y += 4;
-    row(`${bill.paidBy} gets back`, rp(collect(result, bill.paidBy).due),
+    row(t('{name} gets back', { name: bill.paidBy }), rp(collect(result, bill.paidBy).due),
         { size: 10.5, bold: true, ink: ACCENT, gap: 18 });
   }
 
@@ -2097,7 +2131,7 @@ function buildPdf(H) {
   heading('THE BILL');
   for (const it of bill.items) {
     row(it.name || 'Item', amt(Number(it.amount) || 0),
-        { ink: FIGURE, sub: it.sharedBy.length ? sharedByLabel(it.sharedBy) : 'everyone' });
+        { ink: FIGURE, sub: it.sharedBy.length ? sharedByLabel(it.sharedBy) : t('everyone') });
   }
   y += 7;
   room(10); rule(y); y += 17;
@@ -2106,10 +2140,10 @@ function buildPdf(H) {
   if (result.tax) row(chargeLabel('Tax', bill.taxPct), amt(result.tax), { ink: LABEL });
   if (result.discount) {
     row(chargeLabel('Discount', bill.discountPct), `- ${amt(result.discount)}`,
-        { ink: LABEL, sub: `split ${result.discountAmong}` });
+        { ink: LABEL, sub: t('split {n}', { n: result.discountAmong }) });
   }
   if (result.rounding) {
-    row('Rounding', `- ${amt(result.rounding)}`, { ink: LABEL, sub: `split ${result.roundingAmong}` });
+    row(t('Rounding'), `- ${amt(result.rounding)}`, { ink: LABEL, sub: t('split {n}', { n: result.roundingAmong }) });
   }
   y += 6;
   room(38);
@@ -2117,7 +2151,7 @@ function buildPdf(H) {
   const band = 32, pen = [255, 255, 255];
   doc.setFillColor(...INK);
   doc.roundedRect(M, y, RIGHT - M, band, 7, 7, 'F');
-  put('TOTAL', M + 16, y + 21, { size: 8.5, bold: true, ink: pen, space: 1.5 });
+  put(t('TOTAL'), M + 16, y + 21, { size: 8.5, bold: true, ink: pen, space: 1.5 });
   put(rp(result.total), RIGHT - 16, y + 21, { size: 14, bold: true, ink: pen, align: 'right', space: -0.2 });
   y += band;
 
@@ -2153,7 +2187,7 @@ function buildPdf(H) {
   // rather than a screenshot. No page numbers: there is only ever the one page.
   for (let n = 1; n <= doc.getNumberOfPages(); n++) {
     doc.setPage(n);
-    put(bill.title?.trim() || 'Split Bill', M, FOOT, { size: 7.5, ink: FAINT });
+    put(bill.title?.trim() || t('Split Bill'), M, FOOT, { size: 7.5, ink: FAINT });
     put(fmtDate(bill.date) || '', RIGHT, FOOT, { size: 7.5, ink: FAINT, align: 'right' });
   }
   return doc;
@@ -2181,12 +2215,12 @@ async function deliver(file) {
 }
 
 async function sharePdf() {
-  if (!result.people.length) return alert('Add participants and items first.');
+  if (!result.people.length) return alert(t('Add participants and items first.'));
   try {
     await deliver(pdfFile());
   } catch (e) {
     // Whatever went wrong, there is always a way to send the numbers anyway.
-    alert(`The PDF couldn't be sent. ${e.message} You can still send the message on its own.`);
+    alert(t('The PDF couldn\'t be sent. {why} You can still send the message on its own.', { why: e.message }));
   }
 }
 $('pdf').onclick = sharePdf;
@@ -2195,7 +2229,7 @@ $('pdf').onclick = sharePdf;
 // Excel and Sheets and stays readable in a plain text editor; the BOM is what
 // keeps names with accents intact when Excel opens it.
 $('csv').onclick = async () => {
-  if (!result.people.length) return alert('Add participants and items first.');
+  if (!result.people.length) return alert(t('Add participants and items first.'));
   try {
     await deliver(new File(['\ufeff' + toCsv(bill, result)], fileName('csv'), { type: 'text/csv;charset=utf-8' }));
   } catch (e) {

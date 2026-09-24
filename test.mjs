@@ -1,6 +1,6 @@
 // node test.mjs  — fails loudly if the money math breaks.
 import assert from 'node:assert/strict';
-import { calcShares, collect, digits, fmtDate, group, money, parseGemini, roundToSum, setMoneySeparator, shareLabel, sharedByLabel, statedTotal, toCsv, waLink, waNumber } from './split.js';
+import { calcShares, collect, digits, fmtDate, group, money, parseGemini, roundToSum, setMoneySeparator, shareLabel, sharedByLabel, statedTotal, toCsv, waLink, waNumber, setLang, swap, t } from './split.js';
 
 // 1. The example from the brief: equal split per item, nobody pays for what they didn't eat.
 {
@@ -581,6 +581,20 @@ assert.equal(fmtDate('2026-07-29'), '29 Jul 2026');
 assert.equal(fmtDate('2026-01-01'), '01 Jan 2026'); // no timezone slip onto Dec 31
 assert.equal(fmtDate(''), '');
 assert.equal(fmtDate(undefined), '');
+
+// Language: English by default, holes filled either way, and fixed text swaps
+// back and forth without losing its whitespace.
+assert.equal(t('Hi {name}, your share is *Rp {amt}*', { name: 'Ana', amt: '10.000' }), 'Hi Ana, your share is *Rp 10.000*');
+setLang('id');
+assert.equal(t('Hi {name}, your share is *Rp {amt}*', { name: 'Ana', amt: '10.000' }), 'Halo Ana, bagianmu *Rp 10.000*');
+assert.equal(swap('  Add item\n'), '  Tambah item\n');
+assert.equal(swap('Nasi Goreng'), 'Nasi Goreng');
+assert.equal(shareLabel({ took: 1, sharedBy: 3 }), '1 dari 3');
+assert.equal(fmtDate('2026-07-29'), '29 Jul 2026');
+assert.ok(toCsv({ participants: [], items: [] }, calcShares({ participants: [], items: [] })).includes('Tagihan,'));
+setLang('en');
+assert.equal(swap('Tambah item'), 'Add item');
+assert.equal(shareLabel({ took: 1, sharedBy: 3 }), '1 of 3');
 
 console.log('ok');
 

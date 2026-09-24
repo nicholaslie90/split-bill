@@ -1,4 +1,8 @@
 // Bill math. Everything is whole rupiah — no cents in IDR.
+// The page reaches the translations through here, so there is one copy of the
+// language in play: the ?v= must match on both sides or there would be two.
+import { getLang, t } from './i18n.js?v=1';
+export { getLang, setLang, swap, t, translateTree, watch } from './i18n.js?v=1';
 // The only rule that matters: the sum of what everybody pays must equal the bill total, exactly.
 
 // Round `values` to whole rupiah so that they still add up to `target`.
@@ -166,7 +170,7 @@ export function sharedByLabel(sharedBy) {
 
 // How a person's slice of one item reads: "2 of 4" — their shares out of the
 // line's. Empty when nobody else was on the item, so it says nothing then.
-export const shareLabel = (line) => (line.sharedBy > 1 ? `${line.took ?? 1} of ${line.sharedBy}` : '');
+export const shareLabel = (line) => (line.sharedBy > 1 ? t('{a} of {b}', { a: line.took ?? 1, b: line.sharedBy }) : '');
 
 // The other side of the ledger for whoever fronted the bill ("nalangin"): who
 // owes them, and how much they should get back. Their own share stays theirs, so
@@ -267,35 +271,35 @@ const cell = (v) => {
 export function toCsv(bill, result) {
   const paidBy = bill.paidBy || '';
   const rows = [
-    ['Bill', bill.title?.trim() || 'Split Bill'],
-    ['Date', bill.date || ''],
+    [t('Bill'), bill.title?.trim() || t('Split Bill')],
+    [t('Date'), bill.date || ''],
     [],
-    ['Item', 'Amount', 'Shared by'],
+    [t('Item'), t('Amount'), t('Shared by')],
     ...(bill.items ?? []).map((it) => [
-      it.name || 'Item', Number(it.amount) || 0,
-      it.sharedBy?.length ? sharedByLabel(it.sharedBy) : 'everyone',
+      it.name || t('Item'), Number(it.amount) || 0,
+      it.sharedBy?.length ? sharedByLabel(it.sharedBy) : t('everyone'),
     ]),
     [],
-    ['Subtotal', result.subtotal],
-    [statedTotal(bill) == null ? 'Service charge' : 'Service & tax (from the total)', result.service],
-    ['Tax', result.tax],
-    ['Discount', -result.discount],
-    ['Rounding', -result.rounding],
-    ['Total', result.total],
+    [t('Subtotal'), result.subtotal],
+    [statedTotal(bill) == null ? t('Service charge') : t('Service & tax (from the total)'), result.service],
+    [t('Tax'), result.tax],
+    [t('Discount'), -result.discount],
+    [t('Rounding'), -result.rounding],
+    [t('Total'), result.total],
     [],
-    ['Person', 'Phone', 'Paid up front', 'Subtotal', 'Service', 'Tax', 'Discount', 'Rounding', 'Total'],
+    [t('Person'), t('Phone'), t('Paid up front'), t('Subtotal'), t('Service'), t('Tax'), t('Discount'), t('Rounding'), t('Total')],
     ...result.people.map((p) => [
-      p.name, bill.phones?.[p.name] ?? '', p.name === paidBy ? 'yes' : '',
+      p.name, bill.phones?.[p.name] ?? '', p.name === paidBy ? t('yes') : '',
       p.subtotal, p.service, p.tax, -p.discount, -p.rounding, p.total,
     ]),
-    ['All', '', '', result.subtotal, result.service, result.tax, -result.discount, -result.rounding, result.total],
+    [t('All'), '', '', result.subtotal, result.service, result.tax, -result.discount, -result.rounding, result.total],
   ];
-  if (paidBy) rows.push([], ['Paid up front by', paidBy], ['Owed back', collect(result, paidBy).due]);
+  if (paidBy) rows.push([], [t('Paid up front by'), paidBy], [t('Owed back'), collect(result, paidBy).due]);
   // One row per account, so a sheet with three of them still reads as three.
   const pay = (bill.pay ?? [])
     .map((a) => [a?.bank, a?.acct, a?.name].map((v) => (v ?? '').trim()).filter(Boolean))
     .filter((a) => a.length);
-  if (pay.length) rows.push([], ['Transfer to', ...pay[0]], ...pay.slice(1).map((a) => ['', ...a]));
+  if (pay.length) rows.push([], [t('Transfer to'), ...pay[0]], ...pay.slice(1).map((a) => ['', ...a]));
   // `sep=,` has to reach the file unquoted, so it goes in outside the escaping.
   return ['sep=,', ...rows.map((r) => r.map(cell).join(','))].join('\r\n');
 }
@@ -313,7 +317,7 @@ export const money = (n) => new Intl.NumberFormat(locale).format(Math.round(n));
 // date onto the day before. Anything unparseable comes back as the empty string.
 export const fmtDate = (iso) => {
   const d = new Date(`${iso}T12:00:00`);
-  return isNaN(d) ? '' : d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  return isNaN(d) ? '' : d.toLocaleDateString(getLang() === 'id' ? 'id-ID' : 'en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 };
 
 // What's typed into a money field -> the whole rupiah behind it, and back out
