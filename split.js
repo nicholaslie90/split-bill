@@ -239,7 +239,14 @@ export function parseGemini(data) {
     // says nothing, "4x" explains the amount and tells you how many shares the
     // line is worth splitting into.
     const qty = Math.round(Number(raw?.qty));
-    items.push({ name: Number.isFinite(qty) && qty > 1 && qty <= 999 ? `${qty}x ${name}` : name, amount });
+    // A name in a language the table may not read — Japanese, Thai, Korean —
+    // comes with what it means, cleaned the same way as the name. Dropped when
+    // it only repeats the name.
+    const translation = String(raw?.translation ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, MAX_NAME);
+    items.push({
+      name: Number.isFinite(qty) && qty > 1 && qty <= 999 ? `${qty}x ${name}` : name, amount,
+      ...(translation && translation.toLowerCase() !== name.toLowerCase() ? { translation } : {}),
+    });
   }
   // The charges as printed, not as rates: a struk says "Service Charge 5%" and
   // then the figure it actually charged, and the figure is the one that has to

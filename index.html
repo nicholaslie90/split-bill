@@ -416,6 +416,8 @@
     .prog.busy > i { width: 100%; animation: none; opacity: .55; }
   }
   .hint { color: var(--muted); font-size: 13px; margin: 0; }
+  /* A foreign item name's meaning, tucked under the name box it explains. */
+  .hint.meaning { margin: 4px 0 0 12px; font-style: italic; overflow-wrap: anywhere; }
   .share { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; padding: 9px 0; border-top: 1px dashed var(--line); }
   .share:first-of-type { border-top: 0; }
   .share b { font-variant-numeric: tabular-nums; }
@@ -648,7 +650,7 @@
 // The ?v= is not decoration: this page and split.js are cached separately, so a
 // browser holding yesterday's split.js while loading today's page would fail to
 // import and leave every button dead. Bump it whenever split.js gains an export.
-import { CURRENCIES, calcShares, cash, collect, decimals, fmtDate, getCurrency, getLang, group, money, parseGemini, setLang, setCurrency, setMoneySeparator, shareLabel, sharedByLabel, statedTotal, t, toCsv, translateTree, typing, waLink, waNumber, watch } from './split.js?v=15';
+import { CURRENCIES, calcShares, cash, collect, decimals, fmtDate, getCurrency, getLang, group, money, parseGemini, setLang, setCurrency, setMoneySeparator, shareLabel, sharedByLabel, statedTotal, t, toCsv, translateTree, typing, waLink, waNumber, watch } from './split.js?v=16';
 
 const KEY = 'split-bill';
 const $ = (id) => document.getElementById(id);
@@ -708,6 +710,7 @@ function clean(raw) {
   b.items = (Array.isArray(b.items) ? b.items : []).slice(0, 400).map((it) => ({
     ...it, name: String(it?.name ?? '').slice(0, 120), amount: units(it?.amount),
     sharedBy: Array.isArray(it?.sharedBy) ? it.sharedBy.map(String) : [],
+    translation: typeof it?.translation === 'string' ? it.translation.slice(0, 120) : '',
   }));
   for (const k of ['serviceAmt', 'taxAmt', 'discount', 'billTotal']) b[k] = units(b[k]);
   for (const k of ['servicePct', 'taxPct', 'discountPct']) b[k] = pct(b[k]);
@@ -1341,7 +1344,12 @@ function renderItems() {
 
     paintChips();
 
-    box.append(el('div', { className: 'item' }, [el('div', { className: 'row' }, [name, amount, del]), chips]));
+    // What a foreign name means, straight under it, so a line nobody at the
+    // table can read can still be tagged to whoever ate it. Kept out of the
+    // page's own translating: it is the reader's words, not a label.
+    const meaning = item.translation ? el('p', { className: 'hint meaning', textContent: item.translation }) : null;
+    meaning?.setAttribute('translate', 'no');
+    box.append(el('div', { className: 'item' }, [el('div', { className: 'row' }, [name, amount, del]), meaning, chips]));
   });
   if (!bill.items.length) box.append(el('p', { className: 'hint', textContent: 'No items yet.' }));
 }
@@ -1463,7 +1471,7 @@ async function readWithGemini(shot) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     // A picture and nothing else: there is no credential in this page to send.
-    body: JSON.stringify({ image: shot.toDataURL('image/jpeg', 0.85).split(',')[1], currency: getCurrency() }),
+    body: JSON.stringify({ image: shot.toDataURL('image/jpeg', 0.85).split(',')[1], currency: getCurrency(), language: getLang() }),
     // No response at all — offline, DNS, a blocked request — rejects with a
     // bare TypeError that never reaches the sentence below. "Failed to fetch"
     // is not a thing to tell somebody splitting a dinner bill, and without a
@@ -1588,7 +1596,7 @@ async function scanFile(file) {
     const read = await readWithGemini(shot);
     const { items, total } = read;
     // Append, never replace: a bad scan must not wipe out what's already typed.
-    bill.items.push(...items.map((it) => ({ name: it.name, amount: String(it.amount), sharedBy: [] })));
+    bill.items.push(...items.map((it) => ({ name: it.name, amount: String(it.amount), sharedBy: [], ...(it.translation ? { translation: it.translation } : {}) })));
     // The charges the struk printed, so a scan is the whole reading and what is
     // left is who ate what. They go in the flat-amount fields and the
     // percentages are cleared as they do — calcShares ADDS a rate to an amount

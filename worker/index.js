@@ -3,7 +3,7 @@
 // The key lives here as a secret binding so it never reaches the browser. That
 // makes this endpoint the thing worth abusing instead: it holds a key anyone
 // would like to spend. So it takes an image and a currency code from a fixed
-// list, and nothing else — the prompt and the schema are ours, below — and a
+// list, the page's language (en or id), and nothing else — the prompt and the schema are ours, below — and a
 // caller who wants a general-purpose model out of it gets a receipt reading.
 
 const ALLOWED = new Set(['https://nicholaslie90.github.io']);
@@ -22,12 +22,13 @@ const CURRENCY = {
 };
 const WHOLE = new Set(['IDR', 'JPY', 'KRW']); // printed without cents
 
-const ask = (cur) => [
+const ask = (cur, lang) => [
   cur === 'IDR' ? 'Read this Indonesian restaurant receipt (struk).' : 'Read this restaurant receipt.',
   `Amounts on it are in ${CURRENCY[cur]}. Write every amount as a plain number in that currency — `
     + (WHOLE.has(cur) ? 'whole units, ' : 'with its decimals, so 12.50 is 12.5, ')
     + 'no currency symbol and no thousands separators, so 90.000 or 90,000 printed is 90000.',
   'Return every ordered line item exactly as printed, with its quantity and its line total.',
+  `When an item's name is in a language other than English or Indonesian, also give translation: the name in plain ${lang === 'id' ? 'Indonesian' : 'English'}, saying what the dish or drink is. For names already in English or Indonesian, translation is an empty string.`,
   'Do not return service charge, tax, subtotal, discount or total as items — they have fields of their own.',
   'Fill those fields with the figures the receipt actually charged, not the percentages beside them:',
   'service is the service charge (also printed as "Service", "SC" or "Servis");',
@@ -51,8 +52,8 @@ const GEMINI_CONFIG = {
     type: 'object',
     properties: {
       items: { type: 'array', items: { type: 'object',
-        properties: { qty: { type: 'integer' }, name: { type: 'string' }, amount: AMOUNT },
-        required: ['qty', 'name', 'amount'] } },
+        properties: { qty: { type: 'integer' }, name: { type: 'string' }, amount: AMOUNT, translation: { type: 'string' } },
+        required: ['qty', 'name', 'amount', 'translation'] } },
       total: AMOUNT,
       service: AMOUNT,
       tax: AMOUNT,
@@ -82,12 +83,12 @@ function retryDelay(text, header) {
 // no response schema, only a JSON mode, so the shape is spelled out instead —
 // and the page checks the answer the same way whichever reader gave it.
 const DEEPSEEK_URL = 'https://api.deepseek.com/chat/completions';
-const deepseekAsk = (cur) => `${ask(cur)} Reply with JSON only, in this shape: `
-  + '{"items":[{"qty":1,"name":"...","amount":0}],"total":0,"service":0,"tax":0,"discount":0,"place":"...","date":"YYYY-MM-DD"}.';
+const deepseekAsk = (cur, lang) => `${ask(cur, lang)} Reply with JSON only, in this shape: `
+  + '{"items":[{"qty":1,"name":"...","amount":0,"translation":""}],"total":0,"service":0,"tax":0,"discount":0,"place":"...","date":"YYYY-MM-DD"}.';
 
 // Dressed as a Gemini reply, so the page reads both through one door and only
 // learns which one answered from `reader`. Null when DeepSeek can't help either.
-async function readWithDeepSeek(image, cur, key) {
+async function readWithDeepSeek(image, cur, lang, key) {
   const res = await fetch(DEEPSEEK_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
@@ -96,7 +97,7 @@ async function readWithDeepSeek(image, cur, key) {
       temperature: 0,
       response_format: { type: 'json_object' },
       messages: [{ role: 'user', content: [
-        { type: 'text', text: deepseekAsk(cur) },
+        { type: 'text', text: deepseekAsk(cur, lang) },
         { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${image}` } },
       ] }],
     }),
@@ -137,9 +138,10 @@ export default {
         { status: 429, headers: { ...head, 'Content-Type': 'application/json' } });
     }
 
-    let image, currency;
-    try { ({ image, currency } = await req.json()); } catch { image = null; }
+    let image, currency, language;
+    try { ({ image, currency, language } = await req.json()); } catch { image = null; }
     const cur = Object.hasOwn(CURRENCY, currency) ? currency : 'IDR';
+    const lang = language === 'id' ? 'id' : 'en'; // what foreign item names are translated into
     if (typeof image !== 'string' || !image) {
       return new Response(JSON.stringify({ error: 'Send {"image": "<base64 jpeg>"}.' }),
         { status: 400, headers: { ...head, 'Content-Type': 'application/json' } });
@@ -154,7 +156,7 @@ export default {
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': env.GEMINI_KEY },
       body: JSON.stringify({
         generationConfig: GEMINI_CONFIG,
-        contents: [{ parts: [{ text: ask(cur) }, { inline_data: { mime_type: 'image/jpeg', data: image } }] }],
+        contents: [{ parts: [{ text: ask(cur, lang) }, { inline_data: { mime_type: 'image/jpeg', data: image } }] }],
       }),
     });
 
@@ -168,7 +170,7 @@ export default {
       // the next scan asks Gemini first again, so it is back the moment its
       // quota is.
       if (res.status === 429 && env.DEEPSEEK_KEY) {
-        const read = await readWithDeepSeek(image, cur, env.DEEPSEEK_KEY).catch((e) => { console.error('DeepSeek', e); return null; });
+        const read = await readWithDeepSeek(image, cur, lang, env.DEEPSEEK_KEY).catch((e) => { console.error('DeepSeek', e); return null; });
         if (read) return new Response(JSON.stringify(read), { headers: { ...head, 'Content-Type': 'application/json' } });
       }
       // The one thing in a quota refusal the page may have: how long to wait,

@@ -622,6 +622,15 @@ assert.ok(toCsv({ participants: ['A'], items: [{ name: 'X', amount: '1250', shar
 setCurrency('JPY');
 assert.equal(cash(1200), '¥1,200');
 assert.equal(toMinor('1,200.7'), '12007'); // no decimals in yen: every digit counts
+assert.deepEqual(parseGemini({ items: [
+  { qty: 2, name: '枝豆', amount: 450, translation: 'edamame' },
+  { qty: 1, name: 'Ramen', amount: 900, translation: 'ramen' },   // only repeats the name: dropped
+  { qty: 1, name: 'Gyoza', amount: 500, translation: 'dumplings\u0007' },
+] }).items, [
+  { name: '2x 枝豆', amount: 450, translation: 'edamame' },
+  { name: 'Ramen', amount: 900 },
+  { name: 'Gyoza', amount: 500, translation: 'dumplings' },
+]);
 setCurrency('KRW');
 assert.equal(cash(5000, { pdf: true }), 'KRW 5,000'); // the PDF font has no ₩
 setCurrency('IDR');
