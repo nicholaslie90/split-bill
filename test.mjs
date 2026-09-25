@@ -511,6 +511,16 @@ assert.deepEqual(roundToSum([1142.5, 1142.5], 2285), [1143, 1142]);
     ] });
     assert.deepEqual(r.items.map((it) => it.amount), [38250, 31450]);
     assert.deepEqual(r.items.map((it) => it.discount), [6750, 5550]);
+    // Items that already reach the total: a discount beside them is counted
+    // already, and none printed is said as zero so a stale field is cleared.
+    const netted = parseGemini({ total: 69700, discount: 12300, items: [
+      { qty: 1, name: 'Latte', amount: 38250 }, { qty: 1, name: 'Kopi', amount: 31450 }] });
+    assert.deepEqual([netted.discount, netted.service, netted.tax], [0, 0, 0]);
+    const silent = parseGemini({ total: 69700, items: [
+      { qty: 1, name: 'Latte', amount: 45000, discount: 6750 }, { qty: 1, name: 'Kopi', amount: 37000, discount: 5550 }] });
+    assert.deepEqual([silent.discount, silent.service, silent.tax], [0, 0, 0]);
+    // A real voucher that the total confirms stays.
+    assert.equal(parseGemini({ total: 60000, discount: 10000, items: [{ qty: 1, name: 'Teh', amount: 70000 }] }).discount, 10000);
     assert.equal(parseGemini({ items: [{ qty: 1, name: 'Teh', amount: 10000 }] }).items[0].discount, undefined);
     assert.equal(r.discount, 0);
     // A bill-wide voucher on top still stands; nonsense and oversize item discounts don't.

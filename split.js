@@ -262,14 +262,24 @@ export function parseGemini(data) {
   // Zero is a reading too: "Service 0.0 %  0" is a struk saying there is none,
   // and dropping it as nothing left the default 5% standing to be charged.
   const charge = (v) => asAmount(v, true);
+  const total = asAmount(data?.total);
+  let service = charge(data?.service), tax = charge(data?.tax), discount = charge(data?.discount);
+  // The foot of a struk often repeats the item discounts as one line; taking
+  // that off again would charge the discount twice.
+  if (discount !== null && itemOff && discount === itemOff) discount = 0;
+  // Items and charges that already come to the printed total leave nothing to
+  // take off — a discount read beside them was counted in the items. Saying
+  // zero out loud, rather than leaving it out, also clears a discount (or a
+  // default rate) still sitting in the field from an earlier scan.
+  if (items.length && total !== null && items.reduce((a, it) => a + it.amount, 0) + (service ?? 0) + (tax ?? 0) === total) {
+    discount = 0; service ??= 0; tax ??= 0;
+  }
   return {
     items,
-    total: asAmount(data?.total),
-    service: charge(data?.service),
-    tax: charge(data?.tax),
-    // The foot of a struk often repeats the item discounts as one line; taking
-    // that off again would charge the discount twice.
-    discount: ((d) => (d !== null && itemOff && d === itemOff ? 0 : d))(charge(data?.discount)),
+    total,
+    service,
+    tax,
+    discount,
     // Where you were and when: the two things on a struk that are not money,
     // and the two the app used to make you type before it would do anything.
     place: asPlace(data?.place),
