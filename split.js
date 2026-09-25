@@ -58,7 +58,7 @@ export function calcShares(bill) {
     // of 55.000 for the same tea is a receipt to argue with, not to read.
     for (const p of new Set(tagged)) {
       const took = tagged.filter((x) => x === p).length;
-      lines[people.indexOf(p)].push({ name: it.name, ...(it.translation ? { translation: it.translation } : {}), share: each * took, sharedBy: tagged.length, took });
+      lines[people.indexOf(p)].push({ name: it.name, ...(it.translation ? { translation: it.translation } : {}), ...(Number(it.discount) > 0 ? { amount, discount: Number(it.discount) } : {}), share: each * took, sharedBy: tagged.length, took });
       weights[people.indexOf(p)] += each * took;
     }
   }

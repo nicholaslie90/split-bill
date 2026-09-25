@@ -679,3 +679,10 @@ console.log('ok');
   const plain = { participants: ['A'], items: [{ name: 'Teh', amount: '10000', sharedBy: ['A'] }] };
   assert.ok(!toCsv(plain, calcShares(plain)).includes('Price'));
 }
+
+// A person's line carries the item's price and discount, for the message to say.
+{
+  const r = calcShares({ participants: ['A', 'B'], items: [{ name: 'Latte', amount: '38250', discount: '6750', sharedBy: ['A', 'B'] }] });
+  assert.deepEqual([r.people[0].lines[0].amount, r.people[0].lines[0].discount], [38250, 6750]);
+  assert.equal(calcShares({ participants: ['A'], items: [{ name: 'Teh', amount: '10000', sharedBy: ['A'] }] }).people[0].lines[0].discount, undefined);
+}
