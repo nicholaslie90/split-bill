@@ -2,8 +2,8 @@
 // rupiah, yen, won, or cents — so the maths never meets a fraction of a cent.
 // The page reaches the translations through here, so there is one copy of the
 // language in play: the ?v= must match on both sides or there would be two.
-import { getLang, t } from './i18n.js?v=4';
-export { getLang, setLang, swap, t, translateTree, watch } from './i18n.js?v=4';
+import { getLang, t } from './i18n.js?v=5';
+export { getLang, setLang, swap, t, translateTree, watch } from './i18n.js?v=5';
 // The only rule that matters: the sum of what everybody pays must equal the bill total, exactly.
 
 // Round `values` to whole rupiah so that they still add up to `target`.
@@ -285,14 +285,17 @@ export function toCsv(bill, result) {
   const paidBy = bill.paidBy || '';
   // Whole currency in the sheet, so a column of dollars adds up to dollars.
   const d = 10 ** decimals();
+  // What a foreign name means, in a column beside it — only when some item has
+  // one, so a sheet of rupiah lines is the same sheet it always was.
+  const meant = (bill.items ?? []).some((it) => it.translation);
   const rows = [
     [t('Bill'), bill.title?.trim() || t('Split Bill')],
     [t('Date'), bill.date || ''],
     [t('Currency'), cur],
     [],
-    [t('Item'), t('Amount'), t('Shared by')],
+    [t('Item'), ...(meant ? [t('Translation')] : []), t('Amount'), t('Shared by')],
     ...(bill.items ?? []).map((it) => [
-      it.name || t('Item'), Number(it.amount) || 0,
+      it.name || t('Item'), ...(meant ? [it.translation || ''] : []), Number(it.amount) || 0,
       it.sharedBy?.length ? sharedByLabel(it.sharedBy) : t('everyone'),
     ]),
     [],

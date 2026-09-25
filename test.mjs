@@ -631,6 +631,15 @@ assert.deepEqual(parseGemini({ items: [
   { name: 'Ramen', amount: 900 },
   { name: 'Gyoza', amount: 500, translation: 'dumplings' },
 ]);
+{
+  const b = { participants: ['A'], items: [{ name: '枝豆', amount: '450', sharedBy: [], translation: 'Edamame' }, { name: 'Beer', amount: '600', sharedBy: [] }] };
+  const csv = toCsv(b, calcShares(b));
+  assert.ok(csv.includes('Item,Translation,Amount,Shared by'));
+  assert.ok(csv.includes('枝豆,Edamame,450,'));
+  assert.ok(csv.includes('Beer,,600,'));
+  const plain = { participants: ['A'], items: [{ name: 'Beer', amount: '600', sharedBy: [] }] };
+  assert.ok(toCsv(plain, calcShares(plain)).includes('Item,Amount,Shared by')); // no column when nothing is translated
+}
 setCurrency('KRW');
 assert.equal(cash(5000, { pdf: true }), 'KRW 5,000'); // the PDF font has no ₩
 setCurrency('IDR');

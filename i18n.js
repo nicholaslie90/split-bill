@@ -223,6 +223,7 @@ const ID = {
   // --- the spreadsheet
   'Bill': 'Tagihan',
   'Shared by': 'Dibagi oleh',
+  'Translation': 'Terjemahan',
   'Service & tax (from the total)': 'Servis & pajak (dari total)',
   'Person': 'Orang',
   'Phone': 'No. HP',
