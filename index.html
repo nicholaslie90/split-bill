@@ -1741,7 +1741,13 @@ function messageFor(p) {
       '', t('Your own share: {amt}', { amt: cash(p.total) }),
     ].join('\n');
   }
-  const lines = p.lines.map((l) => `• ${l.name || 'Item'} — ${cash(l.share)}${shareLabel(l) ? ` (${shareLabel(l)})` : ''}`);
+  // A foreign name carries its meaning on the line beneath, in WhatsApp's
+  // italics, the way the PDF does. Underscores inside it would end the italics
+  // early, so they go.
+  const lines = p.lines.flatMap((l) => [
+    `• ${l.name || 'Item'} — ${cash(l.share)}${shareLabel(l) ? ` (${shareLabel(l)})` : ''}`,
+    ...(l.translation ? [`   _${l.translation.replace(/_/g, ' ')}_`] : []),
+  ]);
   const extras = [
     p.service ? `${svcName()}: ${cash(p.service)}` : null,
     p.tax ? `${t('Tax')}: ${cash(p.tax)}` : null,
