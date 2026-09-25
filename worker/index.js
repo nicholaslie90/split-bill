@@ -28,12 +28,14 @@ const ask = (cur, lang) => [
     + (WHOLE.has(cur) ? 'whole units, ' : 'with its decimals, so 12.50 is 12.5, ')
     + 'no currency symbol and no thousands separators, so 90.000 or 90,000 printed is 90000.',
   'Return every ordered line item exactly as printed, with its quantity and its line total.',
+  'Option lines printed under an item ("1Small", "Ice", "Less Sugar") are part of it, not items of their own.',
+  'A discount printed under a single item ("Menu Discount", "Diskon", "Promo") belongs to that item: give it as that item\'s discount, a positive number, and leave it out of the bill\'s discount.',
   `When an item's name is in a language other than English or Indonesian, also give translation: the name in plain ${lang === 'id' ? 'Indonesian' : 'English'}, saying what the dish or drink is. For names already in English or Indonesian, translation is an empty string.`,
   'Do not return service charge, tax, subtotal, discount or total as items — they have fields of their own.',
   'Fill those fields with the figures the receipt actually charged, not the percentages beside them:',
   'service is the service charge (also printed as "Service", "SC" or "Servis");',
-  'tax is the government tax ("PPN", "PB1", "Pajak", "Tax");',
-  'discount is any amount taken off ("Diskon", "Discount", "Potongan", "Voucher"), as a positive number;',
+  'tax is the government tax ("PPN", "PB1", "Pajak", "Tax") charged on top — tax the struk says is already included in the prices is not charged, so leave it out;',
+  'discount is any amount taken off the whole bill ("Diskon", "Discount", "Potongan", "Voucher"), as a positive number — not a line that only adds up the item discounts;',
   'total is the final figure at the foot of the struk.',
   'place is the name of the restaurant, cafe or shop printed at the head of the struk — the trading name alone, not its address, branch code, tagline or tax number.',
   'date is the date on the struk as YYYY-MM-DD.',
@@ -52,7 +54,7 @@ const GEMINI_CONFIG = {
     type: 'object',
     properties: {
       items: { type: 'array', items: { type: 'object',
-        properties: { qty: { type: 'integer' }, name: { type: 'string' }, amount: AMOUNT, translation: { type: 'string' } },
+        properties: { qty: { type: 'integer' }, name: { type: 'string' }, amount: AMOUNT, discount: AMOUNT, translation: { type: 'string' } },
         required: ['qty', 'name', 'amount', 'translation'] } },
       total: AMOUNT,
       service: AMOUNT,
@@ -84,7 +86,7 @@ function retryDelay(text, header) {
 // and the page checks the answer the same way whichever reader gave it.
 const DEEPSEEK_URL = 'https://api.deepseek.com/chat/completions';
 const deepseekAsk = (cur, lang) => `${ask(cur, lang)} Reply with JSON only, in this shape: `
-  + '{"items":[{"qty":1,"name":"...","amount":0,"translation":""}],"total":0,"service":0,"tax":0,"discount":0,"place":"...","date":"YYYY-MM-DD"}.';
+  + '{"items":[{"qty":1,"name":"...","amount":0,"discount":0,"translation":""}],"total":0,"service":0,"tax":0,"discount":0,"place":"...","date":"YYYY-MM-DD"}.';
 
 // Dressed as a Gemini reply, so the page reads both through one door and only
 // learns which one answered from `reader`. Null when DeepSeek can't help either.

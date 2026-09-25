@@ -502,6 +502,21 @@ assert.deepEqual(roundToSum([1142.5, 1142.5], 2285), [1143, 1142]);
     assert.equal(res.total, 485100);
   }
 
+  // A discount printed under an item comes off that item, so it lands on whoever
+  // had it. The foot's "Menu Discount" only adds them up, and is not taken twice.
+  {
+    const r = parseGemini({ total: 69700, discount: 12300, items: [
+      { qty: 1, name: 'Butterscoth Creamy Latte', amount: 45000, discount: 6750 },
+      { qty: 1, name: 'Kopi Susu Batavia', amount: 37000, discount: 5550 },
+    ] });
+    assert.deepEqual(r.items.map((it) => it.amount), [38250, 31450]);
+    assert.equal(r.discount, 0);
+    // A bill-wide voucher on top still stands; nonsense and oversize item discounts don't.
+    assert.equal(parseGemini({ discount: 5000, items: [{ qty: 1, name: 'Teh', amount: 10000, discount: 2000 }] }).discount, 5000);
+    assert.equal(parseGemini({ items: [{ qty: 1, name: 'Teh', amount: 10000, discount: -2000 }] }).items[0].amount, 10000);
+    assert.equal(parseGemini({ items: [{ qty: 1, name: 'Teh', amount: 10000, discount: 99999 }] }).items[0].amount, 0);
+  }
+
   // A reply longer than any real struk is truncated rather than pasted in whole.
   assert.equal(parseGemini({ items: Array(900).fill({ qty: 1, name: 'Teh', amount: 5000 }) }).items.length, 200);
 

@@ -229,9 +229,15 @@ const asAmount = (v, charge = false) => {
 
 export function parseGemini(data) {
   const items = [];
+  // A discount printed under one item comes off that item, so it goes to
+  // whoever ate it rather than being spread per head across the table.
+  let itemOff = 0;
   for (const raw of (Array.isArray(data?.items) ? data.items : []).slice(0, MAX_ITEMS)) {
-    const amount = asAmount(raw?.amount);
-    if (amount === null) continue;
+    const gross = asAmount(raw?.amount);
+    if (gross === null) continue;
+    const off = Math.min(asAmount(raw?.discount, true) ?? 0, gross);
+    const amount = gross - off;
+    itemOff += off;
     // Control characters would come straight back out in a WhatsApp message.
     const name = String(raw?.name ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, MAX_NAME);
     if (!name) continue;
@@ -260,7 +266,9 @@ export function parseGemini(data) {
     total: asAmount(data?.total),
     service: charge(data?.service),
     tax: charge(data?.tax),
-    discount: charge(data?.discount),
+    // The foot of a struk often repeats the item discounts as one line; taking
+    // that off again would charge the discount twice.
+    discount: ((d) => (d !== null && itemOff && d === itemOff ? 0 : d))(charge(data?.discount)),
     // Where you were and when: the two things on a struk that are not money,
     // and the two the app used to make you type before it would do anything.
     place: asPlace(data?.place),
