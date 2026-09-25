@@ -510,6 +510,8 @@ assert.deepEqual(roundToSum([1142.5, 1142.5], 2285), [1143, 1142]);
       { qty: 1, name: 'Kopi Susu Batavia', amount: 37000, discount: 5550 },
     ] });
     assert.deepEqual(r.items.map((it) => it.amount), [38250, 31450]);
+    assert.deepEqual(r.items.map((it) => it.discount), [6750, 5550]);
+    assert.equal(parseGemini({ items: [{ qty: 1, name: 'Teh', amount: 10000 }] }).items[0].discount, undefined);
     assert.equal(r.discount, 0);
     // A bill-wide voucher on top still stands; nonsense and oversize item discounts don't.
     assert.equal(parseGemini({ discount: 5000, items: [{ qty: 1, name: 'Teh', amount: 10000, discount: 2000 }] }).discount, 5000);
@@ -663,3 +665,17 @@ assert.equal(cash(120000), 'Rp 120.000');
 
 console.log('ok');
 
+
+// The sheet shows the struk's price and the item's discount beside the amount
+// charged — only when an item has one.
+{
+  const bill = { participants: ['A'], items: [
+    { name: 'Latte', amount: '38250', discount: '6750', sharedBy: ['A'] },
+    { name: 'Teh', amount: '10000', sharedBy: ['A'] },
+  ] };
+  const csv = toCsv(bill, calcShares(bill));
+  assert.ok(csv.includes('Latte,45000,-6750,38250,'), csv);
+  assert.ok(csv.includes('Teh,10000,0,10000,'), csv);
+  const plain = { participants: ['A'], items: [{ name: 'Teh', amount: '10000', sharedBy: ['A'] }] };
+  assert.ok(!toCsv(plain, calcShares(plain)).includes('Price'));
+}

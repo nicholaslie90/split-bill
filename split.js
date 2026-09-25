@@ -2,8 +2,8 @@
 // rupiah, yen, won, or cents — so the maths never meets a fraction of a cent.
 // The page reaches the translations through here, so there is one copy of the
 // language in play: the ?v= must match on both sides or there would be two.
-import { getLang, t } from './i18n.js?v=5';
-export { getLang, setLang, swap, t, translateTree, watch } from './i18n.js?v=5';
+import { getLang, t } from './i18n.js?v=6';
+export { getLang, setLang, swap, t, translateTree, watch } from './i18n.js?v=6';
 // The only rule that matters: the sum of what everybody pays must equal the bill total, exactly.
 
 // Round `values` to whole rupiah so that they still add up to `target`.
@@ -251,6 +251,7 @@ export function parseGemini(data) {
     const translation = String(raw?.translation ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, MAX_NAME);
     items.push({
       name: Number.isFinite(qty) && qty > 1 && qty <= 999 ? `${qty}x ${name}` : name, amount,
+      ...(off ? { discount: off } : {}),
       ...(translation && translation.toLowerCase() !== name.toLowerCase() ? { translation } : {}),
     });
   }
@@ -296,14 +297,18 @@ export function toCsv(bill, result) {
   // What a foreign name means, in a column beside it — only when some item has
   // one, so a sheet of rupiah lines is the same sheet it always was.
   const meant = (bill.items ?? []).some((it) => it.translation);
+  // Likewise the price as printed and what came off it, beside the amount charged.
+  const cut = (bill.items ?? []).some((it) => Number(it.discount) > 0);
   const rows = [
     [t('Bill'), bill.title?.trim() || t('Split Bill')],
     [t('Date'), bill.date || ''],
     [t('Currency'), cur],
     [],
-    [t('Item'), ...(meant ? [t('Translation')] : []), t('Amount'), t('Shared by')],
+    [t('Item'), ...(meant ? [t('Translation')] : []), ...(cut ? [t('Price'), t('Item discount')] : []), t('Amount'), t('Shared by')],
     ...(bill.items ?? []).map((it) => [
-      it.name || t('Item'), ...(meant ? [it.translation || ''] : []), Number(it.amount) || 0,
+      it.name || t('Item'), ...(meant ? [it.translation || ''] : []),
+      ...(cut ? [(Number(it.amount) || 0) + (Number(it.discount) || 0), -(Number(it.discount) || 0)] : []),
+      Number(it.amount) || 0,
       it.sharedBy?.length ? sharedByLabel(it.sharedBy) : t('everyone'),
     ]),
     [],

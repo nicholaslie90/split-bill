@@ -650,7 +650,7 @@
 // The ?v= is not decoration: this page and split.js are cached separately, so a
 // browser holding yesterday's split.js while loading today's page would fail to
 // import and leave every button dead. Bump it whenever split.js gains an export.
-import { CURRENCIES, calcShares, cash, collect, decimals, fmtDate, getCurrency, getLang, group, money, parseGemini, setLang, setCurrency, setMoneySeparator, shareLabel, sharedByLabel, statedTotal, t, toCsv, translateTree, typing, waLink, waNumber, watch } from './split.js?v=19';
+import { CURRENCIES, calcShares, cash, collect, decimals, fmtDate, getCurrency, getLang, group, money, parseGemini, setLang, setCurrency, setMoneySeparator, shareLabel, sharedByLabel, statedTotal, t, toCsv, translateTree, typing, waLink, waNumber, watch } from './split.js?v=20';
 
 const KEY = 'split-bill';
 const $ = (id) => document.getElementById(id);
@@ -711,6 +711,7 @@ function clean(raw) {
     ...it, name: String(it?.name ?? '').slice(0, 120), amount: units(it?.amount),
     sharedBy: Array.isArray(it?.sharedBy) ? it.sharedBy.map(String) : [],
     translation: typeof it?.translation === 'string' ? it.translation.slice(0, 120) : '',
+    discount: units(it?.discount),
   }));
   for (const k of ['serviceAmt', 'taxAmt', 'discount', 'billTotal']) b[k] = units(b[k]);
   for (const k of ['servicePct', 'taxPct', 'discountPct']) b[k] = pct(b[k]);
@@ -1225,10 +1226,14 @@ if (navigator.contacts?.select && window.isSecureContext && !navigator.brave) {
 }
 
 // --- items -----------------------------------------------------------------
+const priceLess = (it, fmt = cash) => t('{price} less {off} discount', {
+  price: fmt((Number(it.amount) || 0) + Number(it.discount)), off: fmt(Number(it.discount)) });
+
 function renderItems() {
   const box = $('items');
   box.textContent = '';
   bill.items.forEach((item, i) => {
+    let cutNote = null;
     const name = el('input', {
       type: 'text', value: item.name, placeholder: 'Item', maxLength: 60, ariaLabel: 'Item name',
       autocapitalize: 'words', spellcheck: false, autocomplete: 'off', enterKeyHint: 'next',
@@ -1239,7 +1244,9 @@ function renderItems() {
       inputMode: 'numeric', maxLength: 15, ariaLabel: 'Amount',
       autocomplete: 'off', enterKeyHint: 'next',
     });
-    onMoneyInput(amount, (raw) => { item.amount = raw; save(); renderSummary(); });
+    // A typed amount is the user's own figure: the struk's price and discount
+    // no longer explain it, so they go.
+    onMoneyInput(amount, (raw) => { item.amount = raw; item.discount = ''; cutNote?.remove(); save(); renderSummary(); });
     const del = el('button', {
       className: 'icon', title: 'Remove item', ariaLabel: 'Remove item', innerHTML: CROSS,
       onclick: async () => {
@@ -1348,8 +1355,12 @@ function renderItems() {
     // table can read can still be tagged to whoever ate it. Kept out of the
     // page's own translating: it is the reader's words, not a label.
     const meaning = item.translation ? el('p', { className: 'hint meaning', textContent: item.translation }) : null;
+    // A discount printed under the item: the price on the struk and what came
+    // off it, so the amount in the box is not a figure nobody recognises.
+    cutNote = Number(item.discount) > 0 ? el('p', { className: 'hint meaning', textContent: priceLess(item) }) : null;
+    cutNote?.setAttribute('translate', 'no');
     meaning?.setAttribute('translate', 'no');
-    box.append(el('div', { className: 'item' }, [el('div', { className: 'row' }, [name, amount, del]), meaning, chips]));
+    box.append(el('div', { className: 'item' }, [el('div', { className: 'row' }, [name, amount, del]), meaning, cutNote, chips]));
   });
   if (!bill.items.length) box.append(el('p', { className: 'hint', textContent: 'No items yet.' }));
 }
@@ -1596,7 +1607,7 @@ async function scanFile(file) {
     const read = await readWithGemini(shot);
     const { items, total } = read;
     // Append, never replace: a bad scan must not wipe out what's already typed.
-    bill.items.push(...items.map((it) => ({ name: it.name, amount: String(it.amount), sharedBy: [], ...(it.translation ? { translation: it.translation } : {}) })));
+    bill.items.push(...items.map((it) => ({ name: it.name, amount: String(it.amount), sharedBy: [], ...(it.translation ? { translation: it.translation } : {}), ...(it.discount ? { discount: String(it.discount) } : {}) })));
     // The charges the struk printed, so a scan is the whole reading and what is
     // left is who ate what. They go in the flat-amount fields and the
     // percentages are cleared as they do — calcShares ADDS a rate to an amount
@@ -2291,7 +2302,9 @@ function buildPdf(H) {
     const [name, meaning] = itemLines(it.name, it.translation);
     row(name, amt(Number(it.amount) || 0),
         { ink: FIGURE, sub: it.sharedBy.length ? sharedByLabel(it.sharedBy) : t('everyone') });
-    if (meaning) { room(SUB); put(meaning, M, y - 5, { size: 7.5, italic: true, ink: LABEL }); y += SUB - 2; }
+    for (const line of [meaning, Number(it.discount) > 0 ? priceLess(it, amt) : '']) {
+      if (line) { room(SUB); put(line, M, y - 5, { size: 7.5, italic: true, ink: LABEL }); y += SUB - 2; }
+    }
   }
   y += 7;
   room(10); rule(y); y += 17;
