@@ -1848,6 +1848,7 @@ const tally = (id, text) => {
 
 function renderSummary() {
   result = calcShares(bill);
+  loadFonts();
   // The items' own sum, not result.subtotal: that one is zero until somebody is
   // at the table, and a scan fills the items in before anybody is. This is the
   // figure being compared against the bottom of the struk.
@@ -2048,6 +2049,48 @@ function renderCharges() {
       : t('{amt} less than the items{rate}, taken off them in proportion. The fields below are switched off while this has a figure in it.', { amt: cash(-result.service), rate });
 }
 
+// --- fonts for names the PDF's own can't draw --------------------------------
+// Helvetica, built into every PDF, is Latin-1 and not much more: a Japanese or
+// Thai item name comes out as noise. A Noto face for the script fixes that,
+// but they are megabytes, so one is fetched only when a bill has a name that
+// needs it — in the background, as soon as the name appears, because the share
+// sheet opens only while the tap is live and there is no waiting for a
+// download then. jsPDF embeds just the glyphs a page uses, so the PDF stays
+// small. Pinned and hashed: a changed file on the CDN is refused, not drawn.
+const DRAWABLE = /^[\x20-\x7e\xa0-\xff€£¥•–—‘’“”…]*$/;
+const NOTO = 'https://cdn.jsdelivr.net/npm/@expo-google-fonts/';
+const SCRIPT_FONTS = {
+  jp: { src: 'noto-sans-jp@0.4.3/400Regular/NotoSansJP_400Regular.ttf', sri: 'sha384-/F+HdBd7+OSCuSYJrnfDePYDsPM3u/TQN9yLPJP8+Czm+bw3+gvnEiY2c6yBA49P' },
+  kr: { src: 'noto-sans-kr@0.4.3/400Regular/NotoSansKR_400Regular.ttf', sri: 'sha384-SAFZb/aEf0qfUt6ReLY23sj0SErpRalmkygP8lhJGhunnRzbx1kVnY2Tq965vqNQ' },
+  sc: { src: 'noto-sans-sc@0.4.3/400Regular/NotoSansSC_400Regular.ttf', sri: 'sha384-GBHqIygnL0eE1DrZBtuOvo2ecokF86qBgVcj1K8A7qyXS+yjDet/wV+4EIltfNNe' },
+  th: { src: 'noto-sans-thai@0.4.2/400Regular/NotoSansThai_400Regular.ttf', sri: 'sha384-ukGcitQ2KJDgrblg8IkfRKqCs5sQLK6le/MHQ5V87YprZfsTGppAp7WmJsBKcp27' },
+};
+const KANA = /[぀-ヿ]/, HANGUL = /[ᄀ-ᇿ㄰-㆏가-힯]/, THAI = /[฀-๿]/, HAN = /[㐀-䶿一-鿿]/;
+const fontData = {};  // key -> base64, once it has arrived
+const fontAsked = {}; // key -> true, so a font is fetched once a visit
+// Kanji and hanzi share code points; a bill with any kana on it is Japanese,
+// and its kanji want the Japanese shapes.
+const hanFont = () => (bill.items.some((it) => KANA.test(it.name)) ? 'jp' : 'sc');
+const scriptOf = (s) => (KANA.test(s) ? 'jp' : HANGUL.test(s) ? 'kr' : THAI.test(s) ? 'th' : HAN.test(s) ? hanFont() : null);
+// The face to draw `s` in: Helvetica if it can, the script's face if that has
+// arrived, or null when neither can — and then the caller prints a stand-in.
+const fontFor = (s) => (DRAWABLE.test(s) ? 'helvetica' : fontData[scriptOf(s)] ? scriptOf(s) : null);
+function loadFonts() {
+  for (const it of bill.items) {
+    const key = !DRAWABLE.test(it.name) && scriptOf(it.name);
+    if (!key || fontAsked[key]) continue;
+    fontAsked[key] = true;
+    fetch(NOTO + SCRIPT_FONTS[key].src, { integrity: SCRIPT_FONTS[key].sri })
+      .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(r.status))))
+      .then((buf) => {
+        const bytes = new Uint8Array(buf);
+        let bin = '';
+        for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+        fontData[key] = btoa(bin);
+      })
+      .catch(() => { fontAsked[key] = false; }); // offline: the translation stands in, and the next change tries again
+  }
+}
 function renderAll() { setCurrency(bill.currency); paintCurrency(); renderPeople(); renderItems(); renderSummary(); renderCharges(); renderPhoto(); renderPays(); renderPicker(); }
 renderAll();
 
@@ -2059,6 +2102,8 @@ renderAll();
 // height that came out. Cheap enough at this size, and nothing here depends on
 // the page height except where the footer sits.
 const PDF_MAX_H = 14400; // the ceiling every PDF viewer honours (200in)
+
+
 function buildPdf(H) {
   const { jsPDF } = window.jspdf ?? {};
   if (!jsPDF) throw new Error(t('PDF library did not load — check your connection.'));
@@ -2088,12 +2133,25 @@ function buildPdf(H) {
   const PAID_LABEL = [82, 112, 107], PAID_FIGURE = [38, 74, 69];
   let y = TOP;
 
-  const put = (s, x, at, { size = 10, bold = false, ink = INK, align = 'left', space = 0 } = {}) => {
-    doc.setFont('helvetica', bold ? 'bold' : 'normal').setFontSize(size).setTextColor(...ink);
+  for (const [key, data] of Object.entries(fontData)) {
+    doc.addFileToVFS(`${key}.ttf`, data);
+    doc.addFont(`${key}.ttf`, key, 'normal');
+  }
+  // The face follows the text: Helvetica where it can draw it, the script's own
+  // where not. The Noto faces come in one weight, so bold and italic are
+  // Helvetica's alone.
+  const face = (s, bold, italic) => {
+    const f = fontFor(String(s)) ?? 'helvetica';
+    doc.setFont(f, f !== 'helvetica' ? 'normal' : bold ? 'bold' : italic ? 'italic' : 'normal');
+  };
+  const put = (s, x, at, { size = 10, bold = false, italic = false, ink = INK, align = 'left', space = 0 } = {}) => {
+    face(s, bold, italic);
+    doc.setFontSize(size).setTextColor(...ink);
     doc.text(String(s), x, at, { align, charSpace: space });
   };
-  const wide = (s, size, bold) => {
-    doc.setFont('helvetica', bold ? 'bold' : 'normal').setFontSize(size);
+  const wide = (s, size, bold, italic = false) => {
+    face(s, bold, italic);
+    doc.setFontSize(size);
     return doc.getTextWidth(String(s));
   };
   // A struk can spend forty characters naming a dish. Cut it rather than let it
@@ -2123,17 +2181,15 @@ function buildPdf(H) {
   // "Rp" only on the figures that carry the page — repeated down a column of
   // twenty it is noise, and the column is unmistakably money without it.
   const rp = (n) => cash(n, { pdf: true }); // ₩ and ฿ are not in the PDF's built-in font
-  // An item's name as the PDF can print it. Helvetica here is Latin-1 and not
-  // much more, so a Japanese or Thai name comes out as noise: then the
-  // translation stands in for it, keeping the quantity in front. A name it can
-  // draw keeps its place, with what it means after it.
-  const DRAWABLE = /^[\x20-\x7e\xa0-\xff€£¥•–—‘’“”…]*$/;
-  const itemName = (name, translation) => {
+  // An item as the PDF prints it: the name as it was on the struk, and what it
+  // means on a line of its own beneath. When no face on hand can draw the name,
+  // the translation takes its place (quantity kept) rather than print noise.
+  const itemLines = (name, translation) => {
     const n = name || 'Item';
-    if (!translation) return n;
-    if (DRAWABLE.test(n)) return `${n} (${translation})`;
-    return `${/^\d+x /.exec(n)?.[0] ?? ''}${translation}`;
+    if (fontFor(n)) return [n, translation || ''];
+    return [translation ? `${/^\d+x /.exec(n)?.[0] ?? ''}${translation}` : n, ''];
   };
+  const SUB = 10; // the italic line under an item
   const amt = (n) => money(n);
 
   const row = (label, amount, { size = 10, bold = false, ink = INK, gap = 16, sub = '', tint = LABEL } = {}) => {
@@ -2169,13 +2225,16 @@ function buildPdf(H) {
     const keep = idx === result.people.length - 1 ? tail : 0;
     const fronted = p.name === bill.paidBy;
     const detail = [
-      ...p.lines.map((l) => [`${itemName(l.name, l.translation)}${shareLabel(l) ? `   ${shareLabel(l)}` : ''}`, money(l.share)]),
+      ...p.lines.map((l) => {
+        const [name, sub] = itemLines(l.name, l.translation);
+        return [`${name}${shareLabel(l) ? `   ${shareLabel(l)}` : ''}`, money(l.share), sub];
+      }),
       ...(p.service ? [[svcName(true), money(p.service)]] : []),
       ...(p.tax ? [[t('Tax'), money(p.tax)]] : []),
       ...(p.discount ? [[t('Discount'), `- ${money(p.discount)}`]] : []),
       ...(p.rounding ? [[t('Rounding'), `- ${money(p.rounding)}`]] : []),
     ];
-    const h = detail.length ? 51 + detail.length * 13 : 44;
+    const h = detail.length ? 51 + detail.length * 13 + detail.filter((d) => d[2]).length * SUB : 44;
     // A card is a unit: it crosses a page whole or not at all. Only somebody
     // with about fifty items of their own could outgrow a page, and then the
     // rows simply flow on their own rather than falling off the bottom of it.
@@ -2194,16 +2253,20 @@ function buildPdf(H) {
       put(rp(p.total), RIGHT - pad, y + 24, { size: 14, bold: true, ink: fronted ? ACCENT : INK, align: 'right', space: -0.2 });
       if (detail.length) rule(y + 35, fronted ? PAID_EDGE : PANEL_EDGE, 0.6, M + pad, RIGHT - pad);
       let at = y + 51;
-      for (const [name, amount] of detail) {
+      for (const [name, amount, sub] of detail) {
         const wa = wide(amount, 9, false) + 20;
         put(clip(name, RIGHT - 2 * pad - M - wa, 9, false), M + pad, at, { size: 9, ink: label });
         put(amount, RIGHT - pad, at, { size: 9, ink: figure, align: 'right' });
+        if (sub) { at += SUB; put(clip(sub, RIGHT - 2 * pad - M - wa, 7.5, false), M + pad, at, { size: 7.5, italic: true, ink: label }); }
         at += 13;
       }
       y += h + 10;
     } else {
       row(p.name, rp(p.total), { size: 12, bold: true, gap: 18 });
-      for (const [name, amount] of detail) row(name, amount, { size: 9, ink: label, gap: 13 });
+      for (const [name, amount, sub] of detail) {
+        row(name, amount, { size: 9, ink: label, gap: 13 });
+        if (sub) { room(SUB); put(sub, M, y - 3, { size: 7.5, italic: true, ink: label }); y += SUB; }
+      }
       y += 10;
     }
   });
@@ -2219,8 +2282,10 @@ function buildPdf(H) {
   // --- the arithmetic behind it, for anyone who wants to check
   heading('THE BILL');
   for (const it of bill.items) {
-    row(itemName(it.name, it.translation), amt(Number(it.amount) || 0),
+    const [name, meaning] = itemLines(it.name, it.translation);
+    row(name, amt(Number(it.amount) || 0),
         { ink: FIGURE, sub: it.sharedBy.length ? sharedByLabel(it.sharedBy) : t('everyone') });
+    if (meaning) { room(SUB); put(meaning, M, y - 5, { size: 7.5, italic: true, ink: LABEL }); y += SUB - 2; }
   }
   y += 7;
   room(10); rule(y); y += 17;
