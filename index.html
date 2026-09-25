@@ -2244,15 +2244,17 @@ function buildPdf(H) {
     const fronted = p.name === bill.paidBy;
     const detail = [
       ...p.lines.map((l) => {
+        // Italic lines beneath: what a foreign name means, and the item's price less its discount.
         const [name, sub] = itemLines(l.name, l.translation);
-        return [`${name}${shareLabel(l) ? `   ${shareLabel(l)}` : ''}`, money(l.share), sub];
+        return [`${name}${shareLabel(l) ? `   ${shareLabel(l)}` : ''}`, money(l.share),
+          [sub, l.discount ? priceLess(l, money) : ''].filter(Boolean)];
       }),
       ...(p.service ? [[svcName(true), money(p.service)]] : []),
       ...(p.tax ? [[t('Tax'), money(p.tax)]] : []),
       ...(p.discount ? [[t('Discount'), `- ${money(p.discount)}`]] : []),
       ...(p.rounding ? [[t('Rounding'), `- ${money(p.rounding)}`]] : []),
     ];
-    const h = detail.length ? 51 + detail.length * 13 + detail.filter((d) => d[2]).length * SUB : 44;
+    const h = detail.length ? 51 + detail.length * 13 + detail.reduce((a, d) => a + (d[2]?.length ?? 0), 0) * SUB : 44;
     // A card is a unit: it crosses a page whole or not at all. Only somebody
     // with about fifty items of their own could outgrow a page, and then the
     // rows simply flow on their own rather than falling off the bottom of it.
@@ -2275,7 +2277,7 @@ function buildPdf(H) {
         const wa = wide(amount, 9, false) + 20;
         put(clip(name, RIGHT - 2 * pad - M - wa, 9, false), M + pad, at, { size: 9, ink: label });
         put(amount, RIGHT - pad, at, { size: 9, ink: figure, align: 'right' });
-        if (sub) { at += SUB; put(clip(sub, RIGHT - 2 * pad - M - wa, 7.5, false), M + pad, at, { size: 7.5, italic: true, ink: label }); }
+        for (const s of sub ?? []) { at += SUB; put(clip(s, RIGHT - 2 * pad - M - wa, 7.5, false), M + pad, at, { size: 7.5, italic: true, ink: label }); }
         at += 13;
       }
       y += h + 10;
@@ -2283,7 +2285,7 @@ function buildPdf(H) {
       row(p.name, rp(p.total), { size: 12, bold: true, gap: 18 });
       for (const [name, amount, sub] of detail) {
         row(name, amount, { size: 9, ink: label, gap: 13 });
-        if (sub) { room(SUB); put(sub, M, y - 3, { size: 7.5, italic: true, ink: label }); y += SUB; }
+        for (const s of sub ?? []) { room(SUB); put(s, M, y - 3, { size: 7.5, italic: true, ink: label }); y += SUB; }
       }
       y += 10;
     }
